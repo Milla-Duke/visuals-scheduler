@@ -1,0 +1,37 @@
+name: Booking Checker
+
+on:
+  schedule:
+    # Every 5 minutes, weekdays only
+    - cron: '*/5 * * * 1-5'
+  workflow_dispatch:  # allows manual trigger from GitHub
+
+jobs:
+  check-bookings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restore the processed bookings tracker from the previous run
+      # This prevents the same Slack message being processed twice
+      - name: Restore processed bookings cache
+        uses: actions/cache@v4
+        with:
+          path: processed_bookings.json
+          key: processed-bookings-${{ github.run_number }}
+          restore-keys: |
+            processed-bookings-
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests dateparser pytz
+
+      - name: Run booking checker
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
+        run: python booking_to_teamup.py
