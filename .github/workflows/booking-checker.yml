@@ -1,9 +1,6 @@
 name: Booking Checker
 
 on:
-  schedule:
-    # Every 5 minutes, weekdays only
-    - cron: '*/5 * * * 1-5'
   workflow_dispatch:  # allows manual trigger from GitHub
 
 jobs:
