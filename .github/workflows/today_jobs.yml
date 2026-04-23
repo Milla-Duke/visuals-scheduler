@@ -11,6 +11,8 @@ on:
 jobs:
   post-todays-jobs:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
  
     steps:
       - name: Check out the repo
@@ -29,4 +31,3 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
         run: python visuals_today.py
- 
