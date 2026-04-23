@@ -204,6 +204,9 @@ def preprocess_date_str(date_str):
     # Remove any remaining parenthetical content e.g. "(flexible)", "(suggest 1pm)"
     cleaned = re.sub(r'\([^)]*\)', '', cleaned)
  
+    # Remove "on air" prefix used in live stream forms e.g. "Thursday April 30th, on air 10-11am"
+    cleaned = re.sub(r'\bon\s+air\b', '', cleaned, flags=re.IGNORECASE)
+ 
     # Strip trailing punctuation that breaks dateparser
     cleaned = cleaned.strip().rstrip('.,: ')
  
@@ -302,6 +305,70 @@ def form_to_html(raw_text):
  
  
 # ═══════════════════════════════════════════════════════════════════════════════
+# LIVE STREAM FORM PARSING
+# The live stream form uses a different format to the regular booking form:
+# labels appear on one line (e.g. "Live stream title:") and the value on the
+# next line, with no *bold* markers. Posted by the "Live Stream Request Form"
+# Slack workflow.
+# ═══════════════════════════════════════════════════════════════════════════════
+ 
+LIVESTREAM_FIELDS = [
+    "Live stream title",
+    "Description",
+    "Date and time of live stream",
+    "Location",
+    "Link to live stream (if externally sourced)",
+    "Please provide any/all other info on the live stream",
+    "Who is reporter and will they be attending",
+    "Live stream requester",
+]
+ 
+def is_livestream_form(text):
+    """Return True if the message looks like a live stream booking form."""
+    if not text:
+        return False
+    t = text.lower()
+    return "live stream title:" in t or "live stream request form" in t
+ 
+def extract_livestream_field(text, field_name):
+    """
+    Extract a field value from the live stream form format:
+      Field Name:
+      value text here
+      Next Field:
+    Labels may end with ':', '?' or nothing. Values are on the following line(s).
+    """
+    next_fields = "|".join(re.escape(f) for f in LIVESTREAM_FIELDS if f != field_name)
+    pattern = rf"{re.escape(field_name)}\s*[:\?]?\s*\n(.*?)(?=(?:{next_fields})\s*[:\?]?\s*\n|$)"
+    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    if match:
+        value = match.group(1).strip()
+        value = re.sub(r'<@[A-Z0-9]+>', '', value)
+        value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
+        value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
+        return value.strip()
+    return ""
+ 
+def livestream_to_html(text):
+    """Format the live stream form fields as HTML for TeamUp notes."""
+    parts = ["<p>"]
+    for field in LIVESTREAM_FIELDS:
+        value = extract_livestream_field(text, field)
+        if value:
+            value_html = (
+                value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br>")
+            )
+            parts.append(f"<strong>{field}</strong><br>")
+            parts.append(f"{value_html}<br><br>")
+    parts.append("</p>")
+    return "\n".join(parts)
+ 
+ 
+# ═══════════════════════════════════════════════════════════════════════════════
 # TEAMUP
 # ═══════════════════════════════════════════════════════════════════════════════
  
@@ -366,18 +433,44 @@ def process_message(msg, channel_id, processed):
  
     if ts in processed:
         return False
-    if not is_booking_form(text):
-        return False
  
-    print(f"\n  📋 New booking form found (ts: {ts})")
+    if is_booking_form(text):
+        print(f"\n  📋 New booking form found (ts: {ts})")
+        return _process_form(
+            ts, text, channel_id, processed,
+            title_fn=lambda t: get_title(extract_field(t, "Brief")),
+            date_fn=lambda t: extract_field(t, "Job time / date"),
+            location_fn=lambda t: extract_field(t, "Location"),
+            notes_fn=form_to_html,
+            label="booking",
+        )
  
-    brief    = extract_field(text, "Brief")
-    date_str = extract_field(text, "Job time / date")
-    location = extract_field(text, "Location")
-    title    = get_title(brief)
+    if is_livestream_form(text):
+        print(f"\n  🎥 New live stream form found (ts: {ts})")
+        return _process_form(
+            ts, text, channel_id, processed,
+            title_fn=lambda t: "LIVE: " + (extract_livestream_field(t, "Live stream title") or "Live stream"),
+            date_fn=lambda t: extract_livestream_field(t, "Date and time of live stream"),
+            location_fn=lambda t: extract_livestream_field(t, "Location"),
+            notes_fn=livestream_to_html,
+            label="live stream",
+        )
+ 
+    return False
+ 
+ 
+def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_fn, notes_fn, label):
+    """
+    Shared handler for both booking and live stream forms.
+    Extracts fields using the provided functions, creates a TeamUp entry,
+    and posts a Slack thread reply.
+    """
+    title    = title_fn(text)
+    date_str = date_fn(text)
+    location = location_fn(text)
  
     start_dt, end_dt = parse_datetime(date_str)
-    notes_html = form_to_html(text)
+    notes_html = notes_fn(text)
  
     print(f"  Title:    {title}")
     print(f"  Date str: {date_str}")
@@ -392,9 +485,8 @@ def process_message(msg, channel_id, processed):
         print(f"  ✓ TeamUp entry created: {event_link}")
  
         if not start_dt:
-            # Date couldn't be parsed — entry created but needs date fixing
             date_note = (
-                "\n⚠️ *Couldn't parse the job date* — the entry has been created "
+                "\n⚠️ *Couldn't parse the date* — the entry has been created "
                 "as an all-day placeholder for today. Please open it in TeamUp and "
                 f"set the correct date.\n_(Date entered: \"{date_str}\")_"
             )
@@ -403,12 +495,12 @@ def process_message(msg, channel_id, processed):
  
         post_thread_reply(channel_id, ts, (
             f"✅ *TeamUp entry created:* <{event_link}|{title}>\n"
-            f"Please assign a team member and add photos/video requirements.{date_note}"
+            f"Please assign a team member and add details.{date_note}"
         ))
     else:
         print(f"  ✗ Failed to create TeamUp entry")
         post_thread_reply(channel_id, ts,
-            "⚠️ Could not automatically create TeamUp entry — please add manually."
+            f"⚠️ Could not automatically create TeamUp entry for this {label} — please add manually."
         )
  
     processed.add(ts)
