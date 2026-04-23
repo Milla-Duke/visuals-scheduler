@@ -193,6 +193,30 @@ def shift_display(shifts, name, d):
         return "_(off)_"
     start_t, end_t = val
     return f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
+def _parse_time_minutes(t_str):
+    """Convert a Humanity time string like '6:00am' to minutes since midnight for sorting."""
+    m = re.match(r'^(\d+):(\d+)\s*(am|pm)$', (t_str or "").strip().lower())
+    if not m:
+        return 9999
+    hour, minute, period = int(m.group(1)), int(m.group(2)), m.group(3)
+    if period == "pm" and hour != 12:
+        hour += 12
+    elif period == "am" and hour == 12:
+        hour = 0
+    return hour * 60 + minute
+
+
+def shift_sort_key(shifts, name, d):
+    """Return a sort key (minutes since midnight) for a person's shift start time."""
+    key = (name, d)
+    if key not in shifts:
+        return 9999   # not in CSV — sort to end
+    val = shifts[key]
+    if val is None:
+        return 9998   # on leave — sort near end
+    return _parse_time_minutes(val[0])
+
+
 def build_weekend_shift_lines(shifts, d):
     """
     Build shift lines for a weekend day from CSV data.
@@ -493,7 +517,7 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         if mon_away:
             lines.append(f"Away: {', '.join(mon_away)}")
         lines.append("")
-        for name in SHIFT_TIME_MEMBERS:
+        for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, mon)):
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
         lines.append("")
@@ -514,7 +538,7 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         if away_names:
             lines.append(f"Away: {', '.join(away_names)}")
         lines.append("")
-        for name in SHIFT_TIME_MEMBERS:
+        for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, d)):
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
     lines.append("")
