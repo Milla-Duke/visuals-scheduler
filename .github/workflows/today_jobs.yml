@@ -1,31 +1,31 @@
 name: Today's Jobs
- 
+
 on:
   # Manual trigger from the GitHub Actions tab — click "Run workflow"
   workflow_dispatch:
- 
+
   # Also fireable by the Cloudflare Worker slash command (future)
   repository_dispatch:
     types: [todays-jobs-trigger]
- 
+
 jobs:
   post-todays-jobs:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
- 
+
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
- 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
- 
+
       - name: Install dependencies
-        run: pip install requests
- 
+        run: pip install requests pytz
+
       - name: Post today's jobs to Slack
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
