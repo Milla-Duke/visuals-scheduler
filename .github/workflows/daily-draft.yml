@@ -33,7 +33,7 @@ jobs:
           python-version: '3.11'
  
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests pytz
  
       - name: Run daily draft
         env:
