@@ -1,22 +1,40 @@
-name: Visuals Daily Draft
-
+name: Daily Draft
+ 
 on:
-  workflow_dispatch:  # triggered externally by cron-job.org
-
+  # SCHEDULED: runs at 5:45pm NZ time on weekdays.
+  # Two entries because NZ switches between NZST (UTC+12) and NZDT (UTC+13)
+  # depending on daylight saving — this covers both without any manual changes.
+  schedule:
+    - cron: '45 5 * * 1-5'   # 5:45pm NZST (UTC+12), used in winter
+    - cron: '45 4 * * 1-5'   # 5:45pm NZDT (UTC+13), used in summer
+ 
+  # MANUAL (GitHub UI): lets you click "Run workflow" from the GitHub
+  # Actions tab to generate a draft at any time.
+  workflow_dispatch:
+ 
+  # SLASH COMMAND: fired by the Cloudflare Worker when someone types
+  # /visuals-update in Slack. Triggers this same workflow instantly.
+  repository_dispatch:
+    types: [manual-draft-trigger]
+ 
 jobs:
   post-draft:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+ 
     steps:
-      - uses: actions/checkout@v4
-
+      - name: Check out the repo
+        uses: actions/checkout@v4
+ 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+ 
       - name: Install dependencies
         run: pip install requests
-
+ 
       - name: Run daily draft
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
