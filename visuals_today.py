@@ -19,6 +19,7 @@ import re
 import sys
 import csv
 import json
+import pytz
 import requests
 from datetime import date, datetime
 
@@ -397,7 +398,9 @@ def post_to_slack(message):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    today = date.today()
+    # Use NZ timezone — GitHub Actions runs in UTC which can be a day behind NZ
+    nz = pytz.timezone("Pacific/Auckland")
+    today = datetime.now(nz).date()
     print(f"Fetching today's jobs ({today.strftime('%A %-d %B')})...")
     message = build_message(today)
     post_to_slack(message)
