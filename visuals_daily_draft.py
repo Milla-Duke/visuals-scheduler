@@ -130,12 +130,19 @@ SHIFT_TIME_MEMBERS = [
 # ═══════════════════════════════════════════════════════════════════════════════
 _HUMANITY_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "humanity_shifts.csv")
 # schedule_name values that mean the person is not working that day
+# schedule_name values that mean the person is not working — show as *(off)*
 _LEAVE_TYPES = {"annual leave", "rdo", "stat day"}
+# schedule_name values that mean the person is present but unavailable — show as *(sick)* / *(training)*
+_LABEL_TYPES = {"sick", "sick leave", "training"}
+
 def load_humanity_shifts():
     """
     Parse humanity_shifts.csv and return a dict:
-      { (employee_name, date): (start_time_str, end_time_str) }
-    For leave entries the value is None.
+      { (employee_name, date): value }
+    where value is:
+      (start_time_str, end_time_str)  — regular shift
+      None                            — off (annual leave / RDO / stat day)
+      "sick" / "training"             — present but unavailable (shows as label)
     Returns {} if the CSV is missing or unreadable.
     """
     if not os.path.exists(_HUMANITY_CSV_PATH):
@@ -155,10 +162,12 @@ def load_humanity_shifts():
                 except ValueError:
                     continue
                 key = (name, d)
-                is_leave = schedule.lower() in _LEAVE_TYPES
-                if is_leave:
+                schedule_lower = schedule.lower()
+                if schedule_lower in _LEAVE_TYPES:
                     if key not in result:
-                        result[key] = None  # leave entry — no shift times
+                        result[key] = None  # off — lower priority than a real shift
+                elif schedule_lower in _LABEL_TYPES:
+                    result[key] = schedule_lower  # store label e.g. "sick"
                 else:
                     result[key] = (start_t, end_t)  # real shift takes priority
     except Exception as e:
@@ -183,7 +192,8 @@ def fmt_humanity_time(t_str):
 def shift_display(shifts, name, d):
     """
     Return the shift time string for a person on date d, e.g. "6am - 2pm".
-    Returns "_(off)_" if they are on leave, or "_(time)_" if not in the CSV.
+    Returns "_(off)_" for leave, "_(sick)_"/"_(training)_" for those types,
+    or "_(time)_" if not in the CSV.
     """
     key = (name, d)
     if key not in shifts:
@@ -191,6 +201,8 @@ def shift_display(shifts, name, d):
     val = shifts[key]
     if val is None:
         return "_(off)_"
+    if isinstance(val, str):
+        return f"_({val})_"  # e.g. _(sick)_ or _(training)_
     start_t, end_t = val
     return f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
 def _parse_time_minutes(t_str):
@@ -214,6 +226,8 @@ def shift_sort_key(shifts, name, d):
     val = shifts[key]
     if val is None:
         return 9998   # on leave — sort near end
+    if isinstance(val, str):
+        return 9997   # sick/training — sort near end but before off
     return _parse_time_minutes(val[0])
 
 
@@ -226,8 +240,15 @@ def build_weekend_shift_lines(shifts, d):
     working = []
     for name in SHIFT_TIME_MEMBERS:
         key = (name, d)
-        if key in shifts and shifts[key] is not None:
-            start_t, end_t = shifts[key]
+        if key not in shifts:
+            continue
+        val = shifts[key]
+        if val is None:
+            continue  # off — skip for weekend list
+        if isinstance(val, str):
+            working.append(("99:99am", "", name))  # sick/training — sort to end
+        else:
+            start_t, end_t = val
             working.append((start_t, end_t, name))
     if not working:
         return []
@@ -245,8 +266,12 @@ def build_weekend_shift_lines(shifts, d):
     working.sort(key=lambda x: parse_time_for_sort(x[0]))
     lines = []
     for start_t, end_t, name in working:
-        time_str = f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
-        lines.append(f"{time_str} - {slack_mention(name)}")
+        display = name_for_shift_list(name)
+        if start_t == "99:99am":
+            lines.append(f"{display} {shift_display(shifts, name, d)}")
+        else:
+            time_str = f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
+            lines.append(f"{display} {time_str}")
     return lines
 # ═══════════════════════════════════════════════════════════════════════════════
 # TEAMUP API
@@ -518,6 +543,8 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             lines.append(f"Away: {', '.join(mon_away)}")
         lines.append("")
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, mon)):
+            if (name, mon) not in shifts:
+                continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
         lines.append("")
@@ -539,6 +566,8 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             lines.append(f"Away: {', '.join(away_names)}")
         lines.append("")
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, d)):
+            if (name, d) not in shifts:
+                continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
     lines.append("")
