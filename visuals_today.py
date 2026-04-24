@@ -127,7 +127,8 @@ for _full in NAME_TO_SLACK:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 _HUMANITY_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "humanity_shifts.csv")
-_LEAVE_TYPES = {"annual leave", "rdo", "stat day"}
+_LEAVE_TYPES  = {"annual leave", "rdo", "stat day"}
+_LABEL_TYPES  = {"sick", "sick leave", "training"}
 
 def load_humanity_shifts():
     if not os.path.exists(_HUMANITY_CSV_PATH):
@@ -147,11 +148,14 @@ def load_humanity_shifts():
                 except ValueError:
                     continue
                 key = (name, d)
-                if schedule.lower() in _LEAVE_TYPES:
+                schedule_lower = schedule.lower()
+                if schedule_lower in _LEAVE_TYPES:
                     if key not in result:
-                        result[key] = None
+                        result[key] = None          # off
+                elif schedule_lower in _LABEL_TYPES:
+                    result[key] = schedule_lower    # e.g. "sick" or "training"
                 else:
-                    result[key] = (start_t, end_t)
+                    result[key] = (start_t, end_t)  # real shift takes priority
     except Exception as e:
         print(f"WARNING: Could not load humanity_shifts.csv: {e}")
     return result
@@ -172,6 +176,8 @@ def shift_display(shifts, name, d):
     val = shifts[key]
     if val is None:
         return "_(off)_"
+    if isinstance(val, str):
+        return f"_({val})_"   # e.g. _(sick)_ or _(training)_
     return f"{fmt_humanity_time(val[0])} - {fmt_humanity_time(val[1])}"
 
 def _parse_time_minutes(t_str):
@@ -192,6 +198,8 @@ def shift_sort_key(shifts, name, d):
     val = shifts[key]
     if val is None:
         return 9998
+    if isinstance(val, str):
+        return 9997   # sick/training — sort near end but before off
     return _parse_time_minutes(val[0])
 
 
@@ -319,8 +327,10 @@ def build_message(today):
         lines.append(f"Away: {', '.join(away_names)}")
     lines.append("")
 
-    # Shift times — sorted by earliest start
+    # Shift times — sorted by earliest start, skip anyone not in CSV
     for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, today)):
+        if (name, today) not in shifts:
+            continue  # not in CSV — skip rather than show _(time)_
         display = NAME_TO_SLACK.get(name, name)
         lines.append(f"{display} {shift_display(shifts, name, today)}")
     lines.append("")
