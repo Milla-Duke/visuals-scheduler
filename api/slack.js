@@ -101,7 +101,7 @@ module.exports = async function handler(req, res) {
         text: "⏳ Generating visuals draft — it'll appear in *#visuals-daily-schedule-message-drafts* in about 30 seconds.",
       });
       // Then trigger GitHub in the background
-      await triggerWorkflow('manual-draft-trigger');
+      await triggerWorkflow('todays-jobs-trigger');
       return;
     }
 
