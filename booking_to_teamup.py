@@ -117,22 +117,17 @@ def get_channel_id(channel_name):
     return None
 
 def get_recent_messages(channel_id, oldest_ts):
-    # First try WITHOUT oldest filter to see if channel has ANY messages
-    test_result = slack_get("conversations.history", {"channel": channel_id, "limit": 5})
-    print(f"  Test (no filter): ok={test_result.get('ok')}, messages={len(test_result.get('messages', []))}, error={test_result.get('error')}")
-    if test_result.get("messages"):
-        for m in test_result["messages"]:
-            print(f"    ts={m.get('ts')} subtype={m.get('subtype')} bot_id={m.get('bot_id')}")
-
-    # Now fetch with the 24h filter
-    params = {"channel": channel_id, "limit": 100, "oldest": oldest_ts}
+    """Fetch recent messages. The Slack oldest API filter returns 0 results
+    for this channel, so we fetch the last 50 and filter by age ourselves."""
+    params = {"channel": channel_id, "limit": 50}
     result = slack_get("conversations.history", params)
     if not result.get("ok"):
         print(f"  Error reading channel: {result.get('error')}")
         print(f"  Full response: {result}")
         return []
-    messages = result.get("messages", [])
-    print(f"  API returned {len(messages)} messages (oldest_ts={oldest_ts})")
+    all_messages = result.get("messages", [])
+    messages = [m for m in all_messages if float(m.get("ts", 0)) > float(oldest_ts)]
+    print(f"  {len(messages)} message(s) in the last 24h")
     return messages
 
 def post_thread_reply(channel_id, thread_ts, text):
