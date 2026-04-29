@@ -1,37 +1,37 @@
 name: Booking Checker
- 
+
 on:
   # PRIMARY TRIGGER: fired instantly by the Cloudflare Worker the moment
   # a message is posted to #visual-crew-bookings. No more polling delay.
   repository_dispatch:
     types: [booking-received]
- 
+
   # FALLBACK: still runs every 15 minutes as a safety net in case the
   # Worker misses something (e.g. during a Cloudflare outage).
   # We've relaxed this from 5 min since the Worker handles the fast path.
   schedule:
     - cron: '*/15 * * * 1-5'
- 
+
   # MANUAL: lets you trigger a run from the GitHub Actions tab if needed
   workflow_dispatch:
- 
+
 # Prevent two runs from processing the same messages simultaneously.
 # If a new run is triggered while one is already in progress, it will
 # wait rather than run in parallel — eliminating duplicate TeamUp entries.
 concurrency:
   group: booking-checker
   cancel-in-progress: false
- 
+
 jobs:
   check-bookings:
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
- 
+
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
- 
+
       # Restore the list of already-processed bookings from cache.
       # This is how the script knows which Slack messages it's already
       # turned into TeamUp entries — without it, it would create duplicates
@@ -42,15 +42,15 @@ jobs:
           path: processed_bookings.json
           key: processed-bookings-${{ github.run_id }}
           restore-keys: processed-bookings-
- 
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
- 
+
       - name: Install dependencies
         run: pip install requests dateparser pytz
- 
+
       # Run the booking checker. The SLACK_BOT_TOKEN and TEAMUP_API_KEY
       # are stored as GitHub Secrets — the script reads them from environment
       # variables (it already supports this alongside config.json).
@@ -58,8 +58,10 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python booking_to_teamup.py
- 
+
       # Save the updated processed list back to cache so the next run
       # knows what was already handled.
       - name: Save processed bookings cache
