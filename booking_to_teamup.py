@@ -57,29 +57,56 @@ TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_BASE_URL           = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 DEFAULT_DURATION_HOURS    = 2
 
+UPSTASH_REDIS_REST_URL    = _config.get("upstash_redis_rest_url") or os.environ.get("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_REDIS_REST_TOKEN  = _config.get("upstash_redis_rest_token") or os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROCESSED MESSAGES TRACKER
 #
-# Schema (v2): stores a dict keyed by Slack message ts.
-# Each entry holds:
-#   - teamup_event_id  : str   — TeamUp event ID, used by the webhook handler
-#                                in slack.js to look up the original booking
-#                                when a photographer is assigned
-#   - slack_text       : str   — raw Slack message text, so the webhook handler
-#                                can extract @mention user IDs and notify them
-#   - channel_id       : str   — channel the booking was posted in, so the
-#                                webhook handler can post a thread reply
+# Uses two storage mechanisms:
+#   1. processed_bookings.json (local file / GitHub Actions cache) — tracks
+#      which Slack message ts values have been processed, for deduplication.
+#   2. Upstash Redis — stores booking lookup data keyed by TeamUp event ID,
+#      so slack.js can find the original Slack message when a photographer
+#      is assigned. Redis is used because Vercel can't reach GitHub at runtime.
 #
-# Backwards compatible: if an entry in the JSON is just a plain string (old
-# format), load_processed() treats it as a processed-only ts with no metadata.
+# Redis key format: booking:{teamup_event_id}
+# Redis value: JSON string with slack_ts, channel_id, mention_ids, title
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def redis_set(key, value_dict, ex_seconds=60*60*24*90):
+    """
+    Store a value in Upstash Redis via the REST API.
+    Expires after 90 days by default (bookings older than that don't need lookup).
+    """
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        print("  WARNING: Upstash Redis not configured — booking lookup will not work")
+        return False
+    headers = {
+        "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    value_str = json.dumps(value_dict)
+    # Upstash REST API: SET key value EX seconds
+    resp = requests.post(
+        f"{UPSTASH_REDIS_REST_URL}/set/{key}",
+        headers=headers,
+        json=[value_str, "EX", ex_seconds],
+        timeout=10,
+    )
+    result = resp.json()
+    if result.get("result") != "OK":
+        print(f"  WARNING: Redis SET failed: {result}")
+        return False
+    return True
+
 
 def load_processed():
     """
     Returns a tuple: (processed_set, bookings_dict)
       processed_set  — set of Slack ts strings already handled (for dedup)
-      bookings_dict  — dict mapping ts -> {teamup_event_id, slack_text, channel_id}
+      bookings_dict  — kept for save_processed() signature compatibility
     """
     try:
         with open(_PROCESSED_PATH) as f:
@@ -87,24 +114,19 @@ def load_processed():
     except (FileNotFoundError, json.JSONDecodeError):
         return set(), {}
 
-    # Support both old format (list of ts strings) and new format (dict)
     raw = data.get("processed", [])
-    bookings = data.get("bookings", {})
-
     if isinstance(raw, list):
         processed = set(raw)
     else:
         processed = set(raw.keys())
 
-    return processed, bookings
+    return processed, {}
 
 
 def save_processed(processed, bookings):
+    """Save the processed ts set to the local JSON file (for dedup cache)."""
     with open(_PROCESSED_PATH, "w") as f:
-        json.dump({
-            "processed": list(processed),
-            "bookings": bookings,
-        }, f, indent=2)
+        json.dump({"processed": list(processed)}, f, indent=2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -602,17 +624,21 @@ def _process_form(ts, text, channel_id, processed, bookings, title_fn, date_fn, 
         event_link = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
         print(f"  ✓ TeamUp entry created: {event_link}")
 
-        # Store the mapping so the TeamUp webhook handler in slack.js can
-        # find this booking when a photographer is later assigned.
+        # Store the mapping in Redis so slack.js can find this booking
+        # when a photographer is later assigned in TeamUp.
         mention_ids = extract_mention_ids(text)
-        bookings[str(event_id)] = {
-            "slack_ts":      ts,
-            "channel_id":    channel_id,
-            "mention_ids":   mention_ids,
-            "title":         title,
-            "confirmed":     False,   # set to True once assignment notification sent
-        }
-        print(f"  Stored booking: event {event_id} → mentions {mention_ids}")
+        redis_key = f"booking:{event_id}"
+        stored = redis_set(redis_key, {
+            "slack_ts":    ts,
+            "channel_id":  channel_id,
+            "mention_ids": mention_ids,
+            "title":       title,
+            "confirmed":   False,
+        })
+        if stored:
+            print(f"  Stored booking in Redis: {redis_key} -> mentions {mention_ids}")
+        else:
+            print(f"  WARNING: Could not store booking in Redis for event {event_id}")
 
         if not start_dt:
             date_note = (
