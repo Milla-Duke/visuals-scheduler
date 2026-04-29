@@ -100,21 +100,29 @@ async function postSlackMessage(channel, text, threadTs = null) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function redisGet(key) {
-  const url  = process.env.UPSTASH_REDIS_REST_URL;
+  const url   = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  console.log(`Redis GET: key=${key} url=${url ? url : 'MISSING'} token=${token ? token.slice(0,8)+'...' : 'MISSING'}`);
   if (!url || !token) {
     console.error('Redis: missing env vars');
     return null;
   }
-  const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const data = await resp.json();
-  if (!data?.result) return null;
   try {
-    return JSON.parse(data.result);
-  } catch {
-    return data.result;
+    const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    console.log(`Redis GET response status: ${resp.status}`);
+    const data = await resp.json();
+    console.log(`Redis GET response data: ${JSON.stringify(data)}`);
+    if (!data?.result) return null;
+    try {
+      return JSON.parse(data.result);
+    } catch {
+      return data.result;
+    }
+  } catch (e) {
+    console.error(`Redis GET failed: ${e.message}`);
+    return null;
   }
 }
 
