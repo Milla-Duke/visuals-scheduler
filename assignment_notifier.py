@@ -50,7 +50,13 @@ def redis_get(key):
     if not result:
         return None
     try:
-        return json.loads(result)
+        parsed = json.loads(result)
+        # If Redis returned a list (e.g. from a SET command stored as array),
+        # it means the value was stored incorrectly — skip it
+        if isinstance(parsed, list):
+            print(f"  WARNING: Redis key {key} contains a list, not a booking dict — skipping")
+            return None
+        return parsed
     except (json.JSONDecodeError, TypeError):
         return result
 
