@@ -1,24 +1,15 @@
 name: Booking Checker
 
 on:
-  # PRIMARY TRIGGER: repository dispatch from Vercel when a message arrives
-  # in #visual-crew-bookings. Note: Vercel's outbound connections to GitHub
-  # are unreliable, so the schedule below is the effective primary trigger.
+  # PRIMARY TRIGGER: fired by Vercel the moment a message is posted
+  # to #visual-crew-bookings via the Slack Events API.
   repository_dispatch:
     types: [booking-received]
-
-  # Runs every 2 minutes on weekdays — this is the reliable trigger since
-  # Vercel cannot consistently reach GitHub to fire the dispatch above.
-  # 2 minutes gives a fast enough response for booking confirmations.
-  schedule:
-    - cron: '*/2 * * * 1-5'
 
   # MANUAL: lets you trigger a run from the GitHub Actions tab if needed
   workflow_dispatch:
 
 # Prevent two runs from processing the same messages simultaneously.
-# If a new run is triggered while one is already in progress, it will
-# wait rather than run in parallel — eliminating duplicate TeamUp entries.
 concurrency:
   group: booking-checker
   cancel-in-progress: false
@@ -33,10 +24,6 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
-      # Restore the list of already-processed bookings from cache.
-      # This is how the script knows which Slack messages it's already
-      # turned into TeamUp entries — without it, it would create duplicates
-      # every time the workflow runs.
       - name: Restore processed bookings cache
         uses: actions/cache@v4
         with:
@@ -52,9 +39,6 @@ jobs:
       - name: Install dependencies
         run: pip install requests dateparser pytz
 
-      # Run the booking checker. The SLACK_BOT_TOKEN and TEAMUP_API_KEY
-      # are stored as GitHub Secrets — the script reads them from environment
-      # variables (it already supports this alongside config.json).
       - name: Run booking checker
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
@@ -63,8 +47,6 @@ jobs:
           UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python booking_to_teamup.py
 
-      # Save the updated processed list back to cache so the next run
-      # knows what was already handled.
       - name: Save processed bookings cache
         uses: actions/cache@v4
         with:
