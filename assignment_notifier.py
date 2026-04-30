@@ -51,10 +51,10 @@ def redis_get(key):
         return None
     try:
         parsed = json.loads(result)
-        # If Redis returned a list (e.g. from a SET command stored as array),
-        # it means the value was stored incorrectly — skip it
+        # If Redis returned a list, the value was stored incorrectly — delete and skip
         if isinstance(parsed, list):
-            print(f"  WARNING: Redis key {key} contains a list, not a booking dict — skipping")
+            print(f"  WARNING: Redis key {key} is malformed (list) — deleting")
+            redis_delete(key)
             return None
         return parsed
     except (json.JSONDecodeError, TypeError):
@@ -68,13 +68,22 @@ def redis_set(key, value, ex_seconds=7776000):
         "Content-Type": "application/json",
     }
     resp = requests.post(
-        f"{UPSTASH_REDIS_REST_URL}/set/{key}",
+        f"{UPSTASH_REDIS_REST_URL}/pipeline",
         headers=headers,
-        json=[json.dumps(value), "EX", ex_seconds],
+        json=[["SET", key, json.dumps(value), "EX", ex_seconds]],
         timeout=10,
     )
-    return resp.json().get("result") == "OK"
+    results = resp.json()
+    return isinstance(results, list) and results[0].get("result") == "OK"
 
+
+def redis_delete(key):
+    """Delete a key from Upstash Redis."""
+    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+    requests.get(
+        f"{UPSTASH_REDIS_REST_URL}/del/{key}",
+        headers=headers, timeout=10
+    )
 
 def redis_keys(pattern):
     """Return all Redis keys matching a pattern."""
