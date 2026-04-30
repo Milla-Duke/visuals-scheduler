@@ -79,6 +79,7 @@ def redis_set(key, value_dict, ex_seconds=60*60*24*90):
     """
     Store a value in Upstash Redis via the REST API.
     Expires after 90 days by default (bookings older than that don't need lookup).
+    Uses the Upstash REST pipeline format: POST /pipeline with SET key value EX seconds.
     """
     if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
         print("  WARNING: Upstash Redis not configured — booking lookup will not work")
@@ -88,18 +89,18 @@ def redis_set(key, value_dict, ex_seconds=60*60*24*90):
         "Content-Type": "application/json",
     }
     value_str = json.dumps(value_dict)
-    # Upstash REST API: SET key value EX seconds
+    # Upstash REST API pipeline: sends commands as arrays
     resp = requests.post(
-        f"{UPSTASH_REDIS_REST_URL}/set/{key}",
+        f"{UPSTASH_REDIS_REST_URL}/pipeline",
         headers=headers,
-        json=[value_str, "EX", ex_seconds],
+        json=[["SET", key, value_str, "EX", ex_seconds]],
         timeout=10,
     )
-    result = resp.json()
-    if result.get("result") != "OK":
-        print(f"  WARNING: Redis SET failed: {result}")
-        return False
-    return True
+    results = resp.json()
+    if isinstance(results, list) and results[0].get("result") == "OK":
+        return True
+    print(f"  WARNING: Redis SET failed: {results}")
+    return False
 
 
 def load_processed():
