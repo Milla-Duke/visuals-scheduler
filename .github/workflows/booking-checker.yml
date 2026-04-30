@@ -1,16 +1,17 @@
 name: Booking Checker
 
 on:
-  # PRIMARY TRIGGER: fired instantly by the Cloudflare Worker the moment
-  # a message is posted to #visual-crew-bookings. No more polling delay.
+  # PRIMARY TRIGGER: repository dispatch from Vercel when a message arrives
+  # in #visual-crew-bookings. Note: Vercel's outbound connections to GitHub
+  # are unreliable, so the schedule below is the effective primary trigger.
   repository_dispatch:
     types: [booking-received]
 
-  # FALLBACK: still runs every 15 minutes as a safety net in case the
-  # Worker misses something (e.g. during a Cloudflare outage).
-  # We've relaxed this from 5 min since the Worker handles the fast path.
+  # Runs every 2 minutes on weekdays — this is the reliable trigger since
+  # Vercel cannot consistently reach GitHub to fire the dispatch above.
+  # 2 minutes gives a fast enough response for booking confirmations.
   schedule:
-    - cron: '*/15 * * * 1-5'
+    - cron: '*/2 * * * 1-5'
 
   # MANUAL: lets you trigger a run from the GitHub Actions tab if needed
   workflow_dispatch:
