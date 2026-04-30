@@ -102,7 +102,6 @@ async function postSlackMessage(channel, text, threadTs = null) {
 async function redisGet(key) {
   const url   = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  console.log(`Redis GET: key=${key} url=${url ? url : 'MISSING'} token=${token ? token.slice(0,8)+'...' : 'MISSING'}`);
   if (!url || !token) {
     console.error('Redis: missing env vars');
     return null;
@@ -111,9 +110,7 @@ async function redisGet(key) {
     const resp = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    console.log(`Redis GET response status: ${resp.status}`);
     const data = await resp.json();
-    console.log(`Redis GET response data: ${JSON.stringify(data)}`);
     if (!data?.result) return null;
     try {
       return JSON.parse(data.result);
@@ -254,10 +251,9 @@ async function handleTeamupWebhook(body) {
       }
     }
 
-    // Mark as confirmed in Redis to prevent duplicate notifications
-    booking.confirmed = true;
-    await redisSet(redisKey, booking);
-    console.log(`TeamUp webhook: booking ${eventId} marked as confirmed`);
+    // Trigger the assignment notifier workflow via repository dispatch
+    await triggerWorkflow('assignment-check');
+    console.log(`TeamUp webhook: triggered assignment-check workflow`);
   }
 }
 
