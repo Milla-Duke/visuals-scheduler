@@ -1,9 +1,9 @@
 name: Assignment Notifier
 
 on:
-  # Runs every 5 minutes on weekdays to check for newly assigned photographers
-  schedule:
-    - cron: '*/5 * * * 1-5'
+  # Triggered by Vercel when TeamUp webhook fires with a photographer assigned
+  repository_dispatch:
+    types: [assignment-check]
 
   # Manual trigger from the GitHub Actions tab if needed
   workflow_dispatch:
