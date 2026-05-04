@@ -567,8 +567,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
     lines.append("")
-    # -- Editorial notes placeholder (weekday only — Friday has it per-day above)
-    if len(target_dates) == 1:
     # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
     if len(target_dates) == 1:
         d = target_dates[0]
@@ -629,7 +627,7 @@ def main():
     # trigger lands outside that window and exits silently.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-   if now_nz.hour != 17:
+    if now_nz.hour != 17:
         print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
         sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
