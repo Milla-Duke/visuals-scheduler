@@ -621,16 +621,8 @@ def post_to_slack(message, channel):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 def main():
-    # ── TIME GUARD ─────────────────────────────────────────────────────────────
-    # Two cron entries in daily-draft.yml cover NZST and NZDT, but both fire
-    # every day. We only want to post during the 5pm hour NZ time — the other
-    # trigger lands outside that window and exits silently.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-    if now_nz.hour != 17:
-        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
-        sys.exit(0)
-    # ──────────────────────────────────────────────────────────────────────────
 
     # ── TEST MODE ──────────────────────────────────────────────────────────────
     # Set TEST_AS_FRIDAY = True to preview the Friday format regardless of today's date.
