@@ -39,7 +39,7 @@ TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
-SLACK_STAGING_CHANNEL = "visuals-daily-schedule-message-drafts"
+SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
 TEAMUP_BASE_URL = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 # Weekend job entries that should appear as plain links with no time
 WEEKEND_NO_TIME_TITLES = {"morning update", "morning bulletin", "afternoon bulletin"}
@@ -532,8 +532,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         lines += build_day_jobs_section(sun, subcalendar_id, weekend=True)
         lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
         # ── Monday ────────────────────────────────────────────────────────────
         mon = target_dates[2]
         lines.append(format_day_header(mon))
@@ -547,8 +545,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
                 continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
-        lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
         lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
         if editing_subcalendar_id is not None:
@@ -573,8 +569,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
     lines.append("")
     # -- Editorial notes placeholder (weekday only — Friday has it per-day above)
     if len(target_dates) == 1:
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
     # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
     if len(target_dates) == 1:
         d = target_dates[0]
@@ -635,7 +629,7 @@ def main():
     # trigger lands outside that window and exits silently.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-    if now_nz.hour != 17:
+   if now_nz.hour != 17:
         print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
         sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
