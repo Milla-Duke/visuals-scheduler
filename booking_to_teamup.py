@@ -423,6 +423,43 @@ def parse_datetime(date_str):
 
     return parsed, parsed + timedelta(hours=DEFAULT_DURATION_HOURS)
 
+def parse_date_only(date_str):
+    """
+    Try to extract just a date from a string that could not be fully parsed.
+    Strips time tokens and attempts to parse what remains as a date.
+    Returns a date string like "2026-05-05" or None if nothing can be extracted.
+    Used as a fallback so all-day events land on the correct date rather than today.
+    """
+    if not date_str:
+        return None
+
+    cleaned = preprocess_date_str(date_str)
+
+    # Strip time-like tokens to isolate the date portion
+    stripped = re.sub(r'\b\d{1,2}(?:[:.\.]\d{2})?\s*(?:am|pm)\b', '', cleaned, flags=re.IGNORECASE)
+    stripped = re.sub(r'\b(?:morning|afternoon|evening|midday|noon|midnight|lunchtime)\b', '', stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r'[-\u2013].*$', '', stripped)  # strip anything after a dash
+    stripped = re.sub(r'\s+', ' ', stripped).strip().rstrip('.,: ')
+
+    if not stripped:
+        return None
+
+    parse_settings = {
+        "TIMEZONE": "Pacific/Auckland",
+        "RETURN_AS_TIMEZONE_AWARE": True,
+        "PREFER_DATES_FROM": "future",
+    }
+
+    parsed = dateparser.parse(stripped, settings=parse_settings)
+    if not parsed:
+        fallback = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}
+        parsed = dateparser.parse(stripped, settings=fallback)
+
+    if parsed:
+        return parsed.strftime("%Y-%m-%d")
+    return None
+
+
 def form_to_html(raw_text):
     """Convert the Slack workflow form text into structured HTML for TeamUp notes."""
     parts = ["<p>"]
@@ -510,7 +547,7 @@ def livestream_to_html(text):
 # TEAMUP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_teamup_event(title, start_dt, end_dt, location, notes_html):
+def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=None):
     """
     POST a new event to the Visuals subcalendar.
 
@@ -536,18 +573,25 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html):
         "tz": "Pacific/Auckland",
         "custom": {"item_type": ["content"]},
     }
+    # Store raw date string temporarily so the fallback can extract the date
+    if raw_date_str:
+        payload["raw_date_str"] = raw_date_str
 
     if start_dt:
         # Normal case: we have a parsed start and end time
         payload["start_dt"] = fmt(start_dt)
         payload["end_dt"] = fmt(end_dt)
     else:
-        # Date couldn't be parsed — create as an all-day event for today.
-        # TeamUp requires dates, so this ensures the entry is created rather
-        # than failing entirely. The user will get a warning to fix the date.
-        today = datetime.now(AUCKLAND_TZ).strftime("%Y-%m-%d")
-        payload["start_dt"] = today
-        payload["end_dt"] = today
+        # Date couldn't be fully parsed — try to extract just the date portion
+        # so the all-day event lands on the correct day rather than today.
+        # Falls back to today only if no date can be extracted at all.
+        date_only = None
+        if "raw_date_str" in payload:
+            date_only = parse_date_only(payload.pop("raw_date_str"))
+        if not date_only:
+            date_only = datetime.now(AUCKLAND_TZ).strftime("%Y-%m-%d")
+        payload["start_dt"] = date_only
+        payload["end_dt"] = date_only
         payload["all_day"] = True
 
     resp = requests.post(
@@ -618,7 +662,7 @@ def _process_form(ts, text, channel_id, processed, bookings, title_fn, date_fn, 
     print(f"  Parsed:   {start_dt}")
     print(f"  Location: {location}")
 
-    event = create_teamup_event(title, start_dt, end_dt, location, notes_html)
+    event = create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=date_str)
 
     if event:
         event_id   = event.get("id", "")
