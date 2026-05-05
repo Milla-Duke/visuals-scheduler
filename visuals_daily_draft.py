@@ -624,6 +624,15 @@ def main():
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
 
+    # ── TIME GUARD ─────────────────────────────────────────────────────────────
+    # Two cron entries cover NZST and NZDT — only one fires at the right time.
+    # We skip runs outside the 5pm hour, but allow manual runs through always.
+    is_scheduled = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+    if is_scheduled and now_nz.hour != 17:
+        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
+        sys.exit(0)
+    # ──────────────────────────────────────────────────────────────────────────
+
     # ── TEST MODE ──────────────────────────────────────────────────────────────
     # Set TEST_AS_FRIDAY = True to preview the Friday format regardless of today's date.
     # Set back to False when done testing.
