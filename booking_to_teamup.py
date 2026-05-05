@@ -373,6 +373,7 @@ def parse_datetime(date_str):
         "TIMEZONE": "Pacific/Auckland",
         "RETURN_AS_TIMEZONE_AWARE": True,
         "PREFER_DATES_FROM": "future",
+        "DATE_ORDER": "DMY",
     }
 
     # Detect time range patterns like "4:15pm-5pm" or "9:45-10:30am".
@@ -415,7 +416,7 @@ def parse_datetime(date_str):
     if not parsed:
         # Fall back without PREFER_DATES_FROM — this handles explicit past years
         # like "April 29, 2025" which the future preference can reject
-        fallback_settings = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}
+        fallback_settings = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}  # keeps DATE_ORDER: DMY
         parsed = dateparser.parse(cleaned, settings=fallback_settings)
 
     if not parsed:
@@ -448,6 +449,7 @@ def parse_date_only(date_str):
         "TIMEZONE": "Pacific/Auckland",
         "RETURN_AS_TIMEZONE_AWARE": True,
         "PREFER_DATES_FROM": "future",
+        "DATE_ORDER": "DMY",
     }
 
     parsed = dateparser.parse(stripped, settings=parse_settings)
