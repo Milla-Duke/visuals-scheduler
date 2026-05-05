@@ -212,48 +212,10 @@ async function handleTeamupWebhook(body) {
       continue;
     }
 
-    const { slack_ts, channel_id, mention_ids } = booking;
-
-    // Format the job date for the confirmation message
-    let dateStr = '';
-    if (startDt) {
-      try {
-        const dt = new Date(startDt);
-        dateStr = dt.toLocaleString('en-NZ', {
-          timeZone: 'Pacific/Auckland',
-          weekday: 'long',
-          day: 'numeric',
-          month: 'long',
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-        });
-      } catch (e) {
-        dateStr = startDt;
-      }
-    }
-
-    const eventLink  = `https://teamup.com/c/${TEAMUP_CALENDAR_KEY}/events/${eventId}`;
-    const dateClause = dateStr ? ` on ${dateStr}` : '';
-    const confirmMsg = `\u2705 *${who}* has been assigned to your job \u2014 <${eventLink}|${title}>${dateClause}`;
-
-    // 1. Thread reply on the original booking message
-    if (channel_id && slack_ts) {
-      await postSlackMessage(channel_id, confirmMsg, slack_ts);
-      console.log(`TeamUp webhook: posted thread reply to ${channel_id} ts=${slack_ts}`);
-    }
-
-    // 2. DM each @mentioned person from the original form
-    if (mention_ids && mention_ids.length > 0) {
-      for (const userId of mention_ids) {
-        await postSlackMessage(userId, confirmMsg);
-        console.log(`TeamUp webhook: sent DM to ${userId}`);
-      }
-    }
-
-    // Trigger the assignment notifier workflow via repository dispatch
-    await triggerWorkflow('assignment-check');
-    console.log(`TeamUp webhook: triggered assignment-check workflow`);
+    // Notification is handled by assignment_notifier.py via cron-job.org.
+    // Logging here for debugging only — no Slack messages sent from Vercel
+    // to avoid duplicate notifications alongside the Python notifier.
+    console.log(`TeamUp webhook: assignment detected for event ${eventId}, who="${who}" — notifier will handle this`);
   }
 }
 
