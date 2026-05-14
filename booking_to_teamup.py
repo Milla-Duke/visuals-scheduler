@@ -57,75 +57,19 @@ TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_BASE_URL           = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 DEFAULT_DURATION_HOURS    = 2
 
-UPSTASH_REDIS_REST_URL    = _config.get("upstash_redis_rest_url") or os.environ.get("UPSTASH_REDIS_REST_URL", "")
-UPSTASH_REDIS_REST_TOKEN  = _config.get("upstash_redis_rest_token") or os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROCESSED MESSAGES TRACKER
-#
-# Uses two storage mechanisms:
-#   1. processed_bookings.json (local file / GitHub Actions cache) — tracks
-#      which Slack message ts values have been processed, for deduplication.
-#   2. Upstash Redis — stores booking lookup data keyed by TeamUp event ID,
-#      so slack.js can find the original Slack message when a photographer
-#      is assigned. Redis is used because Vercel can't reach GitHub at runtime.
-#
-# Redis key format: booking:{teamup_event_id}
-# Redis value: JSON string with slack_ts, channel_id, mention_ids, title
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def redis_set(key, value_dict, ex_seconds=60*60*24*90):
-    """
-    Store a value in Upstash Redis via the REST API.
-    Expires after 90 days by default (bookings older than that don't need lookup).
-    Uses the Upstash REST pipeline format: POST /pipeline with SET key value EX seconds.
-    """
-    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
-        print("  WARNING: Upstash Redis not configured — booking lookup will not work")
-        return False
-    headers = {
-        "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    value_str = json.dumps(value_dict)
-    # Upstash REST API pipeline: sends commands as arrays
-    resp = requests.post(
-        f"{UPSTASH_REDIS_REST_URL}/pipeline",
-        headers=headers,
-        json=[["SET", key, value_str, "EX", ex_seconds]],
-        timeout=10,
-    )
-    results = resp.json()
-    if isinstance(results, list) and results[0].get("result") == "OK":
-        return True
-    print(f"  WARNING: Redis SET failed: {results}")
-    return False
-
-
 def load_processed():
-    """
-    Returns a tuple: (processed_set, bookings_dict)
-      processed_set  — set of Slack ts strings already handled (for dedup)
-      bookings_dict  — kept for save_processed() signature compatibility
-    """
     try:
         with open(_PROCESSED_PATH) as f:
-            data = json.load(f)
+            return set(json.load(f).get("processed", []))
     except (FileNotFoundError, json.JSONDecodeError):
-        return set(), {}
+        return set()
 
-    raw = data.get("processed", [])
-    if isinstance(raw, list):
-        processed = set(raw)
-    else:
-        processed = set(raw.keys())
-
-    return processed, {}
-
-
-def save_processed(processed, bookings):
-    """Save the processed ts set to the local JSON file (for dedup cache)."""
+def save_processed(processed):
     with open(_PROCESSED_PATH, "w") as f:
         json.dump({"processed": list(processed)}, f, indent=2)
 
@@ -232,22 +176,16 @@ def extract_field(text, field_name):
     pattern = rf"\*{re.escape(field_name)}\??\*\s*\n(.*?)(?=\*(?:{next_fields})\??\*|$)"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:
-        # Strip Slack user mentions to plain text e.g. <@U4BV744Q5> → @Ella
+        # Convert Slack mentions to readable names
+        # e.g. <@U4BV744Q5|anne.gibson> → @anne.gibson
+        # e.g. <@U4BV744Q5> → kept as-is if no display name available
         value = match.group(1).strip()
-        value = re.sub(r'<@[A-Z0-9]+>', '', value)  # remove user ID mentions
+        value = re.sub(r'<@[A-Z0-9]+\|([^>]+)>', r'@\1', value)  # mention with display name
+        value = re.sub(r'<@([A-Z0-9]+)>', r'<@\1>', value)  # keep bare mentions as-is
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)  # links
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)  # bare links
         return value.strip()
     return ""
-
-def extract_mention_ids(text):
-    """
-    Extract all Slack user IDs from <@USERID> mentions in the raw message text.
-    Returns a list of unique user ID strings e.g. ['U4BV744Q5', 'U6WLV9NHH'].
-    These are used by the webhook handler in slack.js to notify reporters
-    when a photographer is assigned.
-    """
-    return list(dict.fromkeys(re.findall(r'<@([A-Z0-9]+)>', text)))
 
 def get_title(brief_text):
     """First sentence of the brief becomes the entry title."""
@@ -258,71 +196,12 @@ def get_title(brief_text):
     parts = first_line.split(".")
     return parts[0].strip() if parts[0].strip() else first_line[:120]
 
-# ── Abbreviation expansion maps ───────────────────────────────────────────────
-# dateparser fails silently on abbreviated day/month names like "Thurs" or
-# "Apr". These maps expand them to full names before parsing.
-
-_DAY_ABBREVS = {
-    r'\bmon\b':   'Monday',
-    r'\btue\b':   'Tuesday',  r'\btues\b':  'Tuesday',
-    r'\bwed\b':   'Wednesday',
-    r'\bthu\b':   'Thursday', r'\bthur\b':  'Thursday', r'\bthurs\b': 'Thursday',
-    r'\bfri\b':   'Friday',
-    r'\bsat\b':   'Saturday',
-    r'\bsun\b':   'Sunday',
-}
-
-_MONTH_ABBREVS = {
-    r'\bjan\b':  'January',  r'\bfeb\b':  'February', r'\bmar\b':  'March',
-    r'\bapr\b':  'April',    r'\bjun\b':  'June',      r'\bjul\b':  'July',
-    r'\baug\b':  'August',   r'\bsep\b':  'September', r'\bsept\b': 'September',
-    r'\boct\b':  'October',  r'\bnov\b':  'November',  r'\bdec\b':  'December',
-}
-
-_DAY_NUMBERS = {
-    'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
-    'friday': 4, 'saturday': 5, 'sunday': 6,
-}
-
-def _resolve_next_day(s):
-    """
-    Replace "next Monday/Tuesday/etc" with the actual date string, since
-    dateparser handles "next <dayname>" unreliably.
-    e.g. "next Monday 9am" → "Monday 4 May 9am"
-    """
-    match = re.search(
-        r'\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b',
-        s, re.IGNORECASE
-    )
-    if not match:
-        return s
-    day_name = match.group(1).lower()
-    target_weekday = _DAY_NUMBERS[day_name]
-    today = datetime.now(AUCKLAND_TZ)
-    days_ahead = (target_weekday - today.weekday() + 7) % 7
-    if days_ahead == 0:
-        days_ahead = 7  # "next Monday" when today is Monday means next week
-    target = today + timedelta(days=days_ahead)
-    return s[:match.start()] + f"{match.group(1).capitalize()} {target.strftime('%-d %B')}" + s[match.end():]
-
-def _expand_abbreviations(s):
-    """Expand abbreviated day and month names to full names."""
-    s = _resolve_next_day(s)
-    for pattern, replacement in _DAY_ABBREVS.items():
-        s = re.sub(pattern, replacement, s, flags=re.IGNORECASE)
-    for pattern, replacement in _MONTH_ABBREVS.items():
-        s = re.sub(pattern, replacement, s, flags=re.IGNORECASE)
-    return s
-
-
 def preprocess_date_str(date_str):
     """
     Clean up common date string issues before parsing:
     - Strips trailing punctuation (periods, commas, colons)
-    - Removes parenthetical content e.g. "(flexible)", "(suggest 1pm)"
-    - Removes "on air" prefix used in live stream forms
-    - Expands abbreviated day/month names e.g. "Thurs" → "Thursday", "Apr" → "April"
-    - Resolves "next Monday" style references to actual dates
+    - Translates parentheticals like (tomorrow), (today) into plain text
+    - Removes other parenthetical content that confuses the parser e.g. (tomorrow)
     - Collapses extra whitespace
     """
     cleaned = date_str.strip()
@@ -343,24 +222,22 @@ def preprocess_date_str(date_str):
     # Collapse whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
-    # Expand abbreviated day/month names AFTER other cleanup
-    cleaned = _expand_abbreviations(cleaned)
-
     return cleaned
 
 def parse_datetime(date_str):
     """
     Parse a natural language date/time string to Auckland-aware datetimes.
-    Handles time ranges like "9:45-10:30am", "4:15pm-5pm", "9am-11am Thursday".
+    Handles time ranges like "9:45-10:30am" or "4:15pm-5pm".
     Returns (start_dt, end_dt) or (None, None) if parsing fails.
 
-    - Expands abbreviated day/month names before parsing (fixes "Thurs", "Apr" etc)
-    - Resolves "next Monday" style references to concrete dates
-    - For time ranges, checks both before AND after the range for the date portion
-      (handles "9am-11am Thursday" where the day name trails the time)
-    - Falls back to parsing without PREFER_DATES_FROM for explicit past years
-    - Falls back to (None, None) gracefully for unparseable strings like "tbc"
-      — caller creates an all-day event for today instead of failing
+    Improvements over original:
+    - Pre-processes strings to remove parentheticals, trailing punctuation
+    - Tighter range detection: end time MUST have am/pm to avoid false matches
+      on date strings like "11am - 22/04/2026"
+    - Falls back to parsing without PREFER_DATES_FROM if first attempt fails,
+      which handles explicit past years like "April 29, 2025"
+    - Falls back to (None, None) gracefully for unparseable strings like
+      "Whenever can work" — caller creates an all-day event instead of failing
     """
     if not date_str:
         return None, None
@@ -373,13 +250,12 @@ def parse_datetime(date_str):
         "TIMEZONE": "Pacific/Auckland",
         "RETURN_AS_TIMEZONE_AWARE": True,
         "PREFER_DATES_FROM": "future",
-        "DATE_ORDER": "DMY",
     }
 
     # Detect time range patterns like "4:15pm-5pm" or "9:45-10:30am".
     # IMPORTANT: end time REQUIRES am/pm (not optional) so that date strings
     # like "11am - 22/04/2026" are NOT falsely detected as time ranges.
-    range_pattern = r'(\d{1,2}(?::\d{2})?(?:\.\d{2})?\s*(?:am|pm)?)\s*[-\u2013]\s*(\d{1,2}(?::\d{2})?(?:\.\d{2})?\s*(?:am|pm))'
+    range_pattern = r'(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s*[-\u2013]\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))'
     range_match = re.search(range_pattern, cleaned, re.IGNORECASE)
 
     if range_match:
@@ -391,17 +267,11 @@ def parse_datetime(date_str):
         if meridiem and not re.search(r'am|pm', start_time_str, re.IGNORECASE):
             start_time_str += meridiem.group(1)
 
-        # Check both before and after the time range for date content.
-        # "9am-11am Thursday May 1" has the date AFTER the range.
-        before = cleaned[:range_match.start()].strip().rstrip(',').strip()
-        after  = cleaned[range_match.end():].strip().lstrip(',').strip()
-        if before and after:
-            date_only = f"{before} {after}".strip()
-        else:
-            date_only = after if len(after) > len(before) else before
+        # Strip the time range from the string to isolate the date portion
+        date_only = cleaned[:range_match.start()].strip().rstrip(',').strip()
 
-        start_dt = dateparser.parse(f"{date_only} {start_time_str}".strip(), settings=parse_settings)
-        end_dt   = dateparser.parse(f"{date_only} {end_time_str}".strip(),   settings=parse_settings)
+        start_dt = dateparser.parse(f"{date_only} {start_time_str}", settings=parse_settings)
+        end_dt   = dateparser.parse(f"{date_only} {end_time_str}",   settings=parse_settings)
 
         if start_dt and end_dt:
             return start_dt, end_dt
@@ -416,51 +286,13 @@ def parse_datetime(date_str):
     if not parsed:
         # Fall back without PREFER_DATES_FROM — this handles explicit past years
         # like "April 29, 2025" which the future preference can reject
-        fallback_settings = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}  # keeps DATE_ORDER: DMY
+        fallback_settings = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}
         parsed = dateparser.parse(cleaned, settings=fallback_settings)
 
     if not parsed:
         return None, None
 
     return parsed, parsed + timedelta(hours=DEFAULT_DURATION_HOURS)
-
-def parse_date_only(date_str):
-    """
-    Try to extract just a date from a string that could not be fully parsed.
-    Strips time tokens and attempts to parse what remains as a date.
-    Returns a date string like "2026-05-05" or None if nothing can be extracted.
-    Used as a fallback so all-day events land on the correct date rather than today.
-    """
-    if not date_str:
-        return None
-
-    cleaned = preprocess_date_str(date_str)
-
-    # Strip time-like tokens to isolate the date portion
-    stripped = re.sub(r'\b\d{1,2}(?:[:.\.]\d{2})?\s*(?:am|pm)\b', '', cleaned, flags=re.IGNORECASE)
-    stripped = re.sub(r'\b(?:morning|afternoon|evening|midday|noon|midnight|lunchtime)\b', '', stripped, flags=re.IGNORECASE)
-    stripped = re.sub(r'[-\u2013].*$', '', stripped)  # strip anything after a dash
-    stripped = re.sub(r'\s+', ' ', stripped).strip().rstrip('.,: ')
-
-    if not stripped:
-        return None
-
-    parse_settings = {
-        "TIMEZONE": "Pacific/Auckland",
-        "RETURN_AS_TIMEZONE_AWARE": True,
-        "PREFER_DATES_FROM": "future",
-        "DATE_ORDER": "DMY",
-    }
-
-    parsed = dateparser.parse(stripped, settings=parse_settings)
-    if not parsed:
-        fallback = {k: v for k, v in parse_settings.items() if k != "PREFER_DATES_FROM"}
-        parsed = dateparser.parse(stripped, settings=fallback)
-
-    if parsed:
-        return parsed.strftime("%Y-%m-%d")
-    return None
-
 
 def form_to_html(raw_text):
     """Convert the Slack workflow form text into structured HTML for TeamUp notes."""
@@ -549,7 +381,7 @@ def livestream_to_html(text):
 # TEAMUP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=None):
+def create_teamup_event(title, start_dt, end_dt, location, notes_html):
     """
     POST a new event to the Visuals subcalendar.
 
@@ -575,25 +407,18 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_
         "tz": "Pacific/Auckland",
         "custom": {"item_type": ["content"]},
     }
-    # Store raw date string temporarily so the fallback can extract the date
-    if raw_date_str:
-        payload["raw_date_str"] = raw_date_str
 
     if start_dt:
         # Normal case: we have a parsed start and end time
         payload["start_dt"] = fmt(start_dt)
         payload["end_dt"] = fmt(end_dt)
     else:
-        # Date couldn't be fully parsed — try to extract just the date portion
-        # so the all-day event lands on the correct day rather than today.
-        # Falls back to today only if no date can be extracted at all.
-        date_only = None
-        if "raw_date_str" in payload:
-            date_only = parse_date_only(payload.pop("raw_date_str"))
-        if not date_only:
-            date_only = datetime.now(AUCKLAND_TZ).strftime("%Y-%m-%d")
-        payload["start_dt"] = date_only
-        payload["end_dt"] = date_only
+        # Date couldn't be parsed — create as an all-day event for today.
+        # TeamUp requires dates, so this ensures the entry is created rather
+        # than failing entirely. The user will get a warning to fix the date.
+        today = datetime.now(AUCKLAND_TZ).strftime("%Y-%m-%d")
+        payload["start_dt"] = today
+        payload["end_dt"] = today
         payload["all_day"] = True
 
     resp = requests.post(
@@ -611,7 +436,7 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def process_message(msg, channel_id, processed, bookings):
+def process_message(msg, channel_id, processed):
     ts   = msg.get("ts", "")
     text = msg.get("text", "")
 
@@ -621,7 +446,7 @@ def process_message(msg, channel_id, processed, bookings):
     if is_booking_form(text):
         print(f"\n  📋 New booking form found (ts: {ts})")
         return _process_form(
-            ts, text, channel_id, processed, bookings,
+            ts, text, channel_id, processed,
             title_fn=lambda t: get_title(extract_field(t, "Brief")),
             date_fn=lambda t: extract_field(t, "Job time / date"),
             location_fn=lambda t: extract_field(t, "Location"),
@@ -632,7 +457,7 @@ def process_message(msg, channel_id, processed, bookings):
     if is_livestream_form(text):
         print(f"\n  🎥 New live stream form found (ts: {ts})")
         return _process_form(
-            ts, text, channel_id, processed, bookings,
+            ts, text, channel_id, processed,
             title_fn=lambda t: "LIVE: " + (extract_livestream_field(t, "Live stream title") or "Live stream"),
             date_fn=lambda t: extract_livestream_field(t, "Date and time of live stream"),
             location_fn=lambda t: extract_livestream_field(t, "Location"),
@@ -643,14 +468,11 @@ def process_message(msg, channel_id, processed, bookings):
     return False
 
 
-def _process_form(ts, text, channel_id, processed, bookings, title_fn, date_fn, location_fn, notes_fn, label):
+def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_fn, notes_fn, label):
     """
     Shared handler for both booking and live stream forms.
     Extracts fields using the provided functions, creates a TeamUp entry,
     and posts a Slack thread reply.
-
-    On success, saves the TeamUp event ID and Slack mention IDs into bookings
-    so that slack.js can send assignment confirmations when the webhook fires.
     """
     title    = title_fn(text)
     date_str = date_fn(text)
@@ -664,28 +486,12 @@ def _process_form(ts, text, channel_id, processed, bookings, title_fn, date_fn, 
     print(f"  Parsed:   {start_dt}")
     print(f"  Location: {location}")
 
-    event = create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=date_str)
+    event = create_teamup_event(title, start_dt, end_dt, location, notes_html)
 
     if event:
         event_id   = event.get("id", "")
         event_link = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
         print(f"  ✓ TeamUp entry created: {event_link}")
-
-        # Store the mapping in Redis so slack.js can find this booking
-        # when a photographer is later assigned in TeamUp.
-        mention_ids = extract_mention_ids(text)
-        redis_key = f"booking:{event_id}"
-        stored = redis_set(redis_key, {
-            "slack_ts":    ts,
-            "channel_id":  channel_id,
-            "mention_ids": mention_ids,
-            "title":       title,
-            "confirmed":   False,
-        })
-        if stored:
-            print(f"  Stored booking in Redis: {redis_key} -> mentions {mention_ids}")
-        else:
-            print(f"  WARNING: Could not store booking in Redis for event {event_id}")
 
         if not start_dt:
             date_note = (
@@ -717,7 +523,7 @@ def main():
         print("ERROR: No Slack token in config.json")
         sys.exit(1)
 
-    processed, bookings = load_processed()
+    processed = load_processed()
 
     channel_id = get_channel_id(SLACK_BOOKINGS_CHANNEL)
     if not channel_id:
@@ -734,10 +540,10 @@ def main():
 
     new_count = 0
     for msg in reversed(messages):   # oldest first
-        if process_message(msg, channel_id, processed, bookings):
+        if process_message(msg, channel_id, processed):
             new_count += 1
 
-    save_processed(processed, bookings)
+    save_processed(processed)
 
     if new_count:
         print(f"\n✓ Created {new_count} new TeamUp entry/entries.")
