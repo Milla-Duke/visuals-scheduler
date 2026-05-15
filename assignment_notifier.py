@@ -147,7 +147,13 @@ def get_teamup_event(event_id):
         headers=headers, timeout=10
     )
     data = resp.json()
-    return data.get("event")
+    event = data.get("event")
+    if event:
+        who = event.get("who", "")
+        print(f"  DEBUG event {event_id}: who='{who}' keys={list(event.keys())}")
+    else:
+        print(f"  DEBUG event {event_id}: response={data}")
+    return event
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
