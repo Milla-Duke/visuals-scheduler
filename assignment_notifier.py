@@ -238,13 +238,30 @@ def main():
 
         print(f"\n  Checking event {event_id} ({title})")
 
+        # Auto-cleanup: remove bookings older than 30 days that still have no
+        # photographer assigned. These are completed or abandoned jobs that are
+        # clogging up the notifier.
+        stored_at = booking.get("stored_at", "")
+        if stored_at:
+            try:
+                from datetime import timezone
+                stored_dt = datetime.fromisoformat(stored_at)
+                age_days = (datetime.now(timezone.utc) - stored_dt).days
+                if age_days > 30:
+                    print(f"  Booking is {age_days} days old — removing from Redis")
+                    redis_delete(key)
+                    continue
+            except Exception:
+                pass
+
         # Fetch the TeamUp event to check if who is now populated
         event = get_teamup_event(event_id)
         if not event:
-            print(f"  Could not fetch TeamUp event {event_id} — skipping")
+            print(f"  Could not fetch TeamUp event {event_id} — removing from Redis (event deleted or inaccessible)")
+            redis_delete(key)
             continue
 
-        who     = (event.get("who") or "").strip()
+        who      = (event.get("who") or "").strip()
         start_dt = event.get("start_dt", "")
 
         if not who:
