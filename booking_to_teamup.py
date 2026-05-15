@@ -57,6 +57,68 @@ TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_BASE_URL           = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 DEFAULT_DURATION_HOURS    = 2
 
+# Slack User ID → display name, used to convert bare @mentions in form text
+# e.g. <@U4BV744Q5> → @Ella Wilks
+_NAME_TO_SLACK_ID = {
+    "Corey Fleming":       "U05MSEE6CLE",
+    "Cameron Pitney":      "UJCKXB7TN",
+    "Claudia Tarrant":     "U6WLV9NHH",
+    "Finn Little":         "U04Q8RUES87",
+    "Anna Heath":          "U09H5K1Q0Q7",
+    "Annaleise Shortland": "UME9TL2HW",
+    "Jason Dorday":        "U05VDUBTJ9W",
+    "Michael Craig":       "U480M042V",
+    "Kane Dickie":         "U03DA4YAFSN",
+    "Dean Purcell":        "U4B81DLTW",
+    "Alyse Wright":        "U057GUTGG3W",
+    "Sylvie Whinray":      "U0A3XK4466S",
+    "Tom Augustine":       "U954JL83S",
+    "Mark Mitchell":       "U4AJQH95Y",
+    "Ella Wilks":          "U4BV744Q5",
+    "Hayden Woodward":     "U03R4TRKTRR",
+    "Michael Morrah":      "U07B4DXQ95H",
+    "Sarah Bristow":       "U07BTB113U0",
+    "Mike Scott":          "U4PLY5LMV",
+    "Simon Plumb":         "U47T7L7S4",
+    "Darryn Fouhy":        "U08DYNFE4BT",
+    "Garth Bray":          "U07C7N4EEKS",
+    "Katie Oliver":        "U06Q0JLGKTN",
+}
+SLACK_ID_TO_NAME = {v: k for k, v in _NAME_TO_SLACK_ID.items()}
+
+# Cache for Slack user lookups to avoid repeated API calls
+_slack_user_cache = {}
+
+def get_slack_display_name(user_id):
+    """
+    Look up a Slack user's display name by their ID.
+    Checks the known name map first, then falls back to the Slack API.
+    Returns the display name or None if it can't be found.
+    """
+    if user_id in SLACK_ID_TO_NAME:
+        return SLACK_ID_TO_NAME[user_id]
+    if user_id in _slack_user_cache:
+        return _slack_user_cache[user_id]
+    if not SLACK_BOT_TOKEN:
+        return None
+    try:
+        resp = requests.get(
+            "https://slack.com/api/users.info",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            params={"user": user_id},
+            timeout=5,
+        )
+        data = resp.json()
+        if data.get("ok"):
+            profile = data["user"].get("profile", {})
+            name = (profile.get("display_name") or profile.get("real_name") or "").strip()
+            _slack_user_cache[user_id] = name or None
+            return name or None
+    except Exception:
+        pass
+    _slack_user_cache[user_id] = None
+    return None
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PROCESSED MESSAGES TRACKER
@@ -178,10 +240,14 @@ def extract_field(text, field_name):
     if match:
         # Convert Slack mentions to readable names
         # e.g. <@U4BV744Q5|anne.gibson> → @anne.gibson
-        # e.g. <@U4BV744Q5> → kept as-is if no display name available
+        # e.g. <@U4BV744Q5> → look up in SLACK_ID_TO_NAME, else use raw ID
         value = match.group(1).strip()
         value = re.sub(r'<@[A-Z0-9]+\|([^>]+)>', r'@\1', value)  # mention with display name
-        value = re.sub(r'<@([A-Z0-9]+)>', r'<@\1>', value)  # keep bare mentions as-is
+        def _replace_bare_mention(m):
+            uid = m.group(1)
+            name = get_slack_display_name(uid)
+            return ('@' + name) if name else ''
+        value = re.sub(r'<@([A-Z0-9]+)>', _replace_bare_mention, value)  # bare mention → name
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)  # links
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)  # bare links
         return value.strip()
