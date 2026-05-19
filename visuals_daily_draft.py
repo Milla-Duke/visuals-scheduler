@@ -4,13 +4,6 @@ Visuals Daily Schedule Draft Generator
 =======================================
 Fetches next day's jobs from the TeamUp Visuals calendar and posts
 a pre-formatted draft to the Slack staging channel at 5:45pm weekdays.
-SETUP:
-  1. pip install requests
-  2. Add your Slack bot token to config.json (in the same folder as this script):
-       { "slack_bot_token": "xoxb-your-token-here" }
-  3. Run manually to test:
-       python3 visuals_daily_draft.py
-  4. The Mac scheduler (install_schedule.sh) runs this automatically at 5:45pm Mon-Fri.
 """
 import os
 import re
@@ -20,7 +13,7 @@ import json
 import pytz
 import requests
 from datetime import datetime, timedelta, date
-# Load Slack token from config.json in the same directory as this script
+
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 try:
     with open(_CONFIG_PATH) as _f:
@@ -30,28 +23,26 @@ except FileNotFoundError:
 except json.JSONDecodeError as _e:
     print(f"WARNING: Could not parse config.json: {_e}")
     _config = {}
+
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONFIGURATION — edit these if anything changes
+# CONFIGURATION
 # ═══════════════════════════════════════════════════════════════════════════════
 TEAMUP_API_KEY = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY", "")
 TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
-TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
-TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
-TEAMUP_STUDIO_SUBCALENDAR_NAME  = "NZME Departments > Video Studio"        # Studio bookings subcalendar
+TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"
+TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"
+TEAMUP_STUDIO_SUBCALENDAR_NAME  = "NZME Departments > Video Studio"
 TEAMUP_STUDIO_ID                = 11087384
-TEAMUP_STUDIO_CALENDAR_KEY      = "q1rqrs"                                  # Different calendar to Visuals
-TEAMUP_STUDIO_BASE_URL          = f"https://api.teamup.com/q1rqrs"
-# Slack token — reads from config.json, falls back to environment variable
+TEAMUP_STUDIO_CALENDAR_KEY      = "q1rqrs"
+TEAMUP_STUDIO_BASE_URL          = "https://api.teamup.com/q1rqrs"
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
-SLACK_STAGING_CHANNEL = "visuals-daily-schedule-message-drafts"
+SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
 TEAMUP_BASE_URL = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
-# Weekend job entries that should appear as plain links with no time
 WEEKEND_NO_TIME_TITLES = {"morning update", "morning bulletin", "afternoon bulletin"}
-# Entries to exclude entirely from Saturday and Sunday job lists
 WEEKEND_EXCLUDE_TITLES = {"gallery today", "away", "away:"}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # NAME MAPPING
-# Humanity full name -> Slack display name (without @)
 # ═══════════════════════════════════════════════════════════════════════════════
 NAME_TO_SLACK = {
     "Corey Fleming":       "Corey Fleming",
@@ -70,7 +61,6 @@ NAME_TO_SLACK = {
     "Mark Mitchell":       "mark.mitchell",
     "Ella Wilks":          "Ella Wilks",
     "Hayden Woodward":     "Hayden",
-    # Extended group — may appear in TeamUp job entries but don't get shift times
     "Michael Morrah":      "Michael Morrah",
     "Sarah Bristow":       "Sarah Bristow",
     "Mike Scott":          "Mike Scott",
@@ -80,7 +70,6 @@ NAME_TO_SLACK = {
     "Garth Bray":          "Garth Bray",
     "Katie Oliver":        "Katie Oliver",
 }
-# Slack User IDs — used to generate proper @mention notifications (<@USERID>)
 NAME_TO_SLACK_ID = {
     "Corey Fleming":       "U05MSEE6CLE",
     "Cameron Pitney":      "UJCKXB7TN",
@@ -106,49 +95,21 @@ NAME_TO_SLACK_ID = {
     "Garth Bray":          "U07C7N4EEKS",
     "Katie Oliver":        "U06Q0JLGKTN",
 }
-# Only these team members appear in the shift times block
 SHIFT_TIME_MEMBERS = [
-    "Corey Fleming",
-    "Cameron Pitney",
-    "Claudia Tarrant",
-    "Finn Little",
-    "Anna Heath",
-    "Annaleise Shortland",
-    "Jason Dorday",
-    "Michael Craig",
-    "Kane Dickie",
-    "Dean Purcell",
-    "Alyse Wright",
-    "Sylvie Whinray",
-    "Tom Augustine",
-    "Mark Mitchell",
-    "Ella Wilks",
-    "Hayden Woodward",
+    "Corey Fleming", "Cameron Pitney", "Claudia Tarrant", "Finn Little",
+    "Anna Heath", "Annaleise Shortland", "Jason Dorday", "Michael Craig",
+    "Kane Dickie", "Dean Purcell", "Alyse Wright", "Sylvie Whinray",
+    "Tom Augustine", "Mark Mitchell", "Ella Wilks", "Hayden Woodward",
 ]
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HUMANITY SHIFT LOADER
-# Drop humanity_shifts.csv (exported from Humanity > Reports > Custom Reports >
-# Shifts Scheduled) into the visuals-scheduler folder. The script reads it
-# automatically and fills in real shift times. Falls back to _(time)_ if the
-# CSV is missing or a person has no entry for that day.
 # ═══════════════════════════════════════════════════════════════════════════════
 _HUMANITY_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "humanity_shifts.csv")
-# schedule_name values that mean the person is not working that day
-# schedule_name values that mean the person is not working — show as *(off)*
 _LEAVE_TYPES = {"annual leave", "rdo", "stat day"}
-# schedule_name values that mean the person is present but unavailable — show as *(sick)* / *(training)*
 _LABEL_TYPES = {"sick", "sick leave", "training"}
 
 def load_humanity_shifts():
-    """
-    Parse humanity_shifts.csv and return a dict:
-      { (employee_name, date): value }
-    where value is:
-      (start_time_str, end_time_str)  — regular shift
-      None                            — off (annual leave / RDO / stat day)
-      "sick" / "training"             — present but unavailable (shows as label)
-    Returns {} if the CSV is missing or unreadable.
-    """
     if not os.path.exists(_HUMANITY_CSV_PATH):
         return {}
     result = {}
@@ -169,19 +130,16 @@ def load_humanity_shifts():
                 schedule_lower = schedule.lower()
                 if schedule_lower in _LEAVE_TYPES:
                     if key not in result:
-                        result[key] = None  # off — lower priority than a real shift
+                        result[key] = None
                 elif schedule_lower in _LABEL_TYPES:
-                    result[key] = schedule_lower  # store label e.g. "sick"
+                    result[key] = schedule_lower
                 else:
-                    result[key] = (start_t, end_t)  # real shift takes priority
+                    result[key] = (start_t, end_t)
     except Exception as e:
         print(f"WARNING: Could not load humanity_shifts.csv: {e}")
     return result
+
 def fmt_humanity_time(t_str):
-    """
-    Convert a Humanity time string to the same display format as format_time().
-    "6:00am" -> "6am"   "6:30am" -> "6.30am"   "10:00pm" -> "10pm"
-    """
     if not t_str:
         return ""
     m = re.match(r'^(\d+):(\d+)\s*(am|pm)$', t_str.strip().lower())
@@ -193,12 +151,8 @@ def fmt_humanity_time(t_str):
     if minute:
         return f"{hour}.{minute:02d}{period}"
     return f"{hour}{period}"
+
 def shift_display(shifts, name, d):
-    """
-    Return the shift time string for a person on date d, e.g. "6am - 2pm".
-    Returns "_(off)_" for leave, "_(sick)_"/"_(training)_" for those types,
-    or "_(time)_" if not in the CSV.
-    """
     key = (name, d)
     if key not in shifts:
         return "_(time)_"
@@ -206,11 +160,11 @@ def shift_display(shifts, name, d):
     if val is None:
         return "_(off)_"
     if isinstance(val, str):
-        return f"_({val})_"  # e.g. _(sick)_ or _(training)_
+        return f"_({val})_"
     start_t, end_t = val
     return f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
+
 def _parse_time_minutes(t_str):
-    """Convert a Humanity time string like '6:00am' to minutes since midnight for sorting."""
     m = re.match(r'^(\d+):(\d+)\s*(am|pm)$', (t_str or "").strip().lower())
     if not m:
         return 9999
@@ -221,26 +175,18 @@ def _parse_time_minutes(t_str):
         hour = 0
     return hour * 60 + minute
 
-
 def shift_sort_key(shifts, name, d):
-    """Return a sort key (minutes since midnight) for a person's shift start time."""
     key = (name, d)
     if key not in shifts:
-        return 9999   # not in CSV — sort to end
+        return 9999
     val = shifts[key]
     if val is None:
-        return 9998   # on leave — sort near end
+        return 9998
     if isinstance(val, str):
-        return 9997   # sick/training — sort near end but before off
+        return 9997
     return _parse_time_minutes(val[0])
 
-
 def build_weekend_shift_lines(shifts, d):
-    """
-    Build shift lines for a weekend day from CSV data.
-    Returns a list of "Xam - Xpm - @mention" strings sorted by start time.
-    Returns [] if no CSV data is available for that day.
-    """
     working = []
     for name in SHIFT_TIME_MEMBERS:
         key = (name, d)
@@ -248,16 +194,15 @@ def build_weekend_shift_lines(shifts, d):
             continue
         val = shifts[key]
         if val is None:
-            continue  # off — skip for weekend list
+            continue
         if isinstance(val, str):
-            working.append(("99:99am", "", name))  # sick/training — sort to end
+            working.append(("99:99am", "", name))
         else:
             start_t, end_t = val
             working.append((start_t, end_t, name))
     if not working:
         return []
     def parse_time_for_sort(t_str):
-        """Convert 'H:MMam/pm' to a sortable integer (minutes since midnight)."""
         m = re.match(r'^(\d+):(\d+)\s*(am|pm)$', (t_str or "").strip().lower())
         if not m:
             return 9999
@@ -277,15 +222,11 @@ def build_weekend_shift_lines(shifts, d):
             time_str = f"{fmt_humanity_time(start_t)} - {fmt_humanity_time(end_t)}"
             lines.append(f"{display} {time_str}")
     return lines
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TEAMUP API
 # ═══════════════════════════════════════════════════════════════════════════════
 def get_subcalendar_ids():
-    """
-    Find subcalendar IDs for both the Visuals and Editing calendars.
-    Returns a tuple: (visuals_id, editing_id)
-    editing_id may be None if the Editing subcalendar is not found.
-    """
     headers = {"Teamup-Token": TEAMUP_API_KEY}
     try:
         resp = requests.get(f"{TEAMUP_BASE_URL}/subcalendars", headers=headers, timeout=10)
@@ -316,8 +257,8 @@ def get_subcalendar_ids():
         print(f"WARNING: Could not find '{TEAMUP_STUDIO_SUBCALENDAR_NAME}' subcalendar — using hardcoded ID.")
         studio_id = TEAMUP_STUDIO_ID
     return visuals_id, editing_id, studio_id
+
 def get_events_for_date(target_date, subcalendar_id, base_url=None):
-    """Fetch all events from a subcalendar for a given date."""
     if base_url is None:
         base_url = TEAMUP_BASE_URL
     headers = {"Teamup-Token": TEAMUP_API_KEY}
@@ -338,16 +279,11 @@ def get_events_for_date(target_date, subcalendar_id, base_url=None):
 def get_studio_events_for_date(target_date):
     """Fetch Video Studio events using the Studio calendar key."""
     return get_events_for_date(target_date, TEAMUP_STUDIO_ID, base_url=TEAMUP_STUDIO_BASE_URL)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # FORMATTING HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 def format_time(dt_string):
-    """
-    Convert an ISO datetime string to a human-readable time.
-    e.g. "2024-03-28T07:25:00+13:00" -> "7.25am"
-         "2024-03-28T09:00:00+13:00" -> "9am"
-         "2024-03-28T13:30:00+13:00" -> "1.30pm"
-    """
     if not dt_string:
         return ""
     try:
@@ -361,47 +297,34 @@ def format_time(dt_string):
         return f"{display_hour}{period}"
     except Exception:
         return ""
+
 def slack_mention(name):
-    """
-    Convert a name to a proper Slack @mention using User ID where possible.
-    Falls back to display name if no ID match found.
-    Handles partial/first-name matches for informally entered TeamUp names.
-    """
     name = name.strip()
-    # Exact match
     if name in NAME_TO_SLACK_ID:
         return f"<@{NAME_TO_SLACK_ID[name]}>"
-    # Case-insensitive exact match
     name_lower = name.lower()
     for key, uid in NAME_TO_SLACK_ID.items():
         if key.lower() == name_lower:
             return f"<@{uid}>"
-    # Partial match — name appears anywhere in key (e.g. "Anna" matches "Anna Heath")
     for key, uid in NAME_TO_SLACK_ID.items():
         parts = key.lower().split()
         if name_lower in parts:
             return f"<@{uid}>"
-    # Fall back to display name
     slack_name = NAME_TO_SLACK.get(name, name)
     return f"@{slack_name}"
+
 def name_for_shift_list(humanity_name):
-    """Return the display name (without @) for the shift times block."""
     return NAME_TO_SLACK.get(humanity_name.strip(), humanity_name.strip())
+
 def format_day_header(d):
-    """Format a date as a bold Slack day header. e.g. '*Monday 30 March*'"""
     return f"*{d.strftime('%A %-d %B')}*"
+
 def format_event_line(event, skip_time=False):
-    """
-    Format a single TeamUp event as a job line.
-    Output: "9.30am - 11am @michael.craig ONEROOF: Walk through the toy house"
-    skip_time=True forces no time prefix (used for named weekend entries).
-    """
     title = event.get("title", "Untitled").strip()
     start_dt = event.get("start_dt", "")
     end_dt = event.get("end_dt", "")
     who = (event.get("who") or "").strip()
     event_id = event.get("id", "")
-    # All-day events, or explicitly skipped, get no time prefix
     if event.get("all_day") or skip_time:
         time_part = ""
     else:
@@ -411,13 +334,10 @@ def format_event_line(event, skip_time=False):
             time_part = f"{start_str} - {end_str}"
         else:
             time_part = start_str
-    # Build the @mention(s) from the 'who' field if present
-    # Handles multiple names separated by commas e.g. "Michael Craig, Anna Heath"
     mention = ""
     if who:
         names = [n.strip() for n in who.split(",") if n.strip()]
         mention = " ".join(slack_mention(n) for n in names) + " "
-    # TeamUp event link
     if event_id:
         link = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
         job_text = f"<{link}|{title}>"
@@ -425,32 +345,26 @@ def format_event_line(event, skip_time=False):
         job_text = title
     parts = [p for p in [time_part, f"{mention}{job_text}"] if p]
     return " ".join(parts)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MESSAGE BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
 def _known_name_tokens():
-    """Return a set of lowercase first names and full names of all known team members."""
     tokens = set()
     for full_name in NAME_TO_SLACK.keys():
         tokens.add(full_name.lower())
         tokens.add(full_name.split()[0].lower())
     return tokens
+
 def is_away_entry(event):
-    """
-    Returns True only if an all-day event represents a team member being away.
-    Filters out recurring all-day entries like 'Gallery today' or 'NZH daily newslist'.
-    """
     if not event.get("all_day"):
         return False
     title = (event.get("title") or "").strip().lower()
     who = (event.get("who") or "").strip().lower()
     known = _known_name_tokens()
     return title in known or who in known
+
 def get_away_names(events):
-    """
-    Extract names from all-day events that represent team members being away.
-    Only includes entries whose title or 'who' field matches a known team member name.
-    """
     away = []
     for event in events:
         if not is_away_entry(event):
@@ -459,16 +373,13 @@ def get_away_names(events):
         if name:
             away.append(name)
     return away
+
 def format_weekend_event_line(event):
-    """Format a job line for Sat/Sun — strips time from Morning Update and Afternoon Bulletin."""
     title = (event.get("title") or "").strip().lower()
     skip = any(t in title for t in WEEKEND_NO_TIME_TITLES)
     return format_event_line(event, skip_time=skip)
+
 def build_day_jobs_section(d, subcalendar_id, weekend=False):
-    """
-    Return lines for the jobs section with *Jobs:* header positioned between
-    all-day entries (Gallery today, NZH daily newslist etc.) and timed entries.
-    """
     all_events = get_events_for_date(d, subcalendar_id)
     events = [e for e in all_events if not is_away_entry(e)]
     if weekend:
@@ -488,8 +399,8 @@ def build_day_jobs_section(d, subcalendar_id, weekend=False):
     else:
         lines.append("_(No jobs in diary for this day)_")
     return lines
+
 def build_day_edits_lines(d, editing_subcalendar_id, weekend=False):
-    """Return formatted edits lines for a single day."""
     edits = get_events_for_date(d, editing_subcalendar_id)
     edits_sorted = sorted(edits, key=lambda e: e.get("start_dt", ""))
     if not edits_sorted:
@@ -497,27 +408,22 @@ def build_day_edits_lines(d, editing_subcalendar_id, weekend=False):
     if weekend:
         return [format_weekend_event_line(e) for e in edits_sorted]
     return [format_event_line(e) for e in edits_sorted]
+
 def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=None, studio_subcalendar_id=None):
-    """
-    Build the full draft message for one or more target dates.
-    Returns a string ready to post to Slack.
-    """
     lines = []
-    # Load Humanity shift data (falls back to empty dict if CSV not present)
     shifts = load_humanity_shifts()
     if shifts:
         print(f"✓ Loaded Humanity shifts CSV ({len(shifts)} entries)")
     else:
         print("  No humanity_shifts.csv found — shift times will show as _(time)_")
-    # -- Date header ---------------------------------------------------------
+
     if len(target_dates) == 1:
         lines.append(format_day_header(target_dates[0]))
     else:
         lines.append(f"*Weekend + {target_dates[-1].strftime('%A %-d %B')}*")
     lines.append("")
-    # -- Away + shift times block --------------------------------------------
+
     if len(target_dates) > 1:
-        # Friday message: Sat, Sun, Mon — shifts and jobs interleaved per day
         # ── Saturday ──────────────────────────────────────────────────────────
         sat = target_dates[0]
         lines.append(format_day_header(sat))
@@ -533,6 +439,7 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         lines += build_day_jobs_section(sat, subcalendar_id, weekend=True)
         lines.append("")
+
         # ── Sunday ────────────────────────────────────────────────────────────
         sun = target_dates[1]
         lines.append(format_day_header(sun))
@@ -548,8 +455,7 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         lines += build_day_jobs_section(sun, subcalendar_id, weekend=True)
         lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
+
         # ── Monday ────────────────────────────────────────────────────────────
         mon = target_dates[2]
         lines.append(format_day_header(mon))
@@ -560,11 +466,9 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, mon)):
             if (name, mon) not in shifts:
-                continue  # not in CSV — skip rather than show _(time)_
+                continue
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
-        lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
         lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
         if studio_subcalendar_id is not None:
@@ -590,15 +494,12 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, d)):
             if (name, d) not in shifts:
-                continue  # not in CSV — skip rather than show _(time)_
+                continue
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
+
     lines.append("")
-    # -- Editorial notes placeholder (weekday only — Friday has it per-day above)
-    if len(target_dates) == 1:
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
-    # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
+
     if len(target_dates) == 1:
         d = target_dates[0]
         lines += build_day_jobs_section(d, subcalendar_id, weekend=False)
@@ -615,14 +516,15 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
                 lines.append("")
                 lines.append("*Edits:*")
                 lines += edit_lines
+
     return "\n".join(lines)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SLACK POSTING
 # ═══════════════════════════════════════════════════════════════════════════════
 def post_to_slack(message, channel):
-    """Post a message to a Slack channel via the bot token."""
     if not SLACK_BOT_TOKEN:
-        print("WARNING: No Slack token found in config.json — printing draft to console instead.\n")
+        print("WARNING: No Slack token found — printing draft to console instead.\n")
         print("-" * 60)
         print(message)
         print("-" * 60)
@@ -655,14 +557,15 @@ def post_to_slack(message, channel):
         print(f"✗ Slack error: {result.get('error')}")
         print(f"  Full response: {result}")
         return False
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 def main():
     # ── TIME GUARD ─────────────────────────────────────────────────────────────
-    # Two cron entries in daily-draft.yml cover NZST and NZDT, but both fire
-    # every day. We only want to post during the 5pm hour NZ time — the other
-    # trigger lands outside that window and exits silently.
+    # Runs at 5:45pm NZ time via cron-job.org. The guard prevents the second
+    # GitHub Actions cron entry (for NZDT) from posting outside the 5pm hour.
+    # Manual runs from the Actions tab are always allowed through.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
     is_scheduled = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
@@ -676,37 +579,38 @@ def main():
     # Set back to False when done testing.
     TEST_AS_FRIDAY = False
     # ──────────────────────────────────────────────────────────────────────────
+
     today = date.today()
     if TEST_AS_FRIDAY:
-        # Simulate running on the most recent or upcoming Friday
         days_until_friday = (4 - today.weekday()) % 7 or 7
         today = today + timedelta(days=days_until_friday)
         print(f"[TEST MODE] Simulating Friday run as: {today.strftime('%A %-d %B')}")
-    weekday = today.weekday()  # 0 = Monday, 4 = Friday, 5 = Saturday, 6 = Sunday
-    # Only run on weekdays
+
+    weekday = today.weekday()
     if weekday >= 5:
         print(f"Today is a weekend ({today.strftime('%A')}). No draft to send.")
         sys.exit(0)
-    # Determine which dates to cover
-    if weekday == 4:  # Friday -> cover Saturday, Sunday, Monday
+
+    if weekday == 4:
         target_dates = [
-            today + timedelta(days=1),  # Saturday
-            today + timedelta(days=2),  # Sunday
-            today + timedelta(days=3),  # Monday
+            today + timedelta(days=1),
+            today + timedelta(days=2),
+            today + timedelta(days=3),
         ]
         print(f"Friday run — covering Sat {target_dates[0]}, Sun {target_dates[1]}, Mon {target_dates[2]}")
     else:
         target_dates = [today + timedelta(days=1)]
         print(f"Generating draft for: {target_dates[0].strftime('%A %-d %B')}")
-    # Find the Visuals and Editing subcalendars
+
     print("Connecting to TeamUp...")
     visuals_id, editing_id, studio_id = get_subcalendar_ids()
     print(f"✓ Found '{TEAMUP_SUBCALENDAR_NAME}' subcalendar (ID: {visuals_id})")
     if editing_id:
         print(f"✓ Found '{TEAMUP_EDITING_SUBCALENDAR_NAME}' subcalendar (ID: {editing_id})")
     print(f"✓ Found Video Studio subcalendar (ID: {studio_id})")
-    # Build and post the message
+
     message = build_draft_message(target_dates, visuals_id, editing_id, studio_id)
     post_to_slack(message, SLACK_STAGING_CHANNEL)
+
 if __name__ == "__main__":
     main()
