@@ -37,9 +37,11 @@ TEAMUP_API_KEY = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY
 TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
+TEAMUP_STUDIO_SUBCALENDAR_NAME  = "NZME Departments > Video Studio"        # Studio bookings subcalendar
+TEAMUP_STUDIO_ID                = 11087384
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
-SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
+SLACK_STAGING_CHANNEL = "visuals-daily-schedule-message-drafts"
 TEAMUP_BASE_URL = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 # Weekend job entries that should appear as plain links with no time
 WEEKEND_NO_TIME_TITLES = {"morning update", "morning bulletin", "afternoon bulletin"}
@@ -292,12 +294,15 @@ def get_subcalendar_ids():
     subcalendars = resp.json().get("subcalendars", [])
     visuals_id = None
     editing_id = None
+    studio_id  = None
     for sc in subcalendars:
         name = sc.get("name", "").strip().lower()
         if name == TEAMUP_SUBCALENDAR_NAME.strip().lower():
             visuals_id = sc["id"]
         if name == TEAMUP_EDITING_SUBCALENDAR_NAME.strip().lower():
             editing_id = sc["id"]
+        if name == TEAMUP_STUDIO_SUBCALENDAR_NAME.strip().lower():
+            studio_id = sc["id"]
     if visuals_id is None:
         available = [sc.get("name") for sc in subcalendars]
         print(f"ERROR: Could not find subcalendar '{TEAMUP_SUBCALENDAR_NAME}'.")
@@ -305,7 +310,10 @@ def get_subcalendar_ids():
         sys.exit(1)
     if editing_id is None:
         print(f"WARNING: Could not find '{TEAMUP_EDITING_SUBCALENDAR_NAME}' subcalendar — Edits section will be skipped.")
-    return visuals_id, editing_id
+    if studio_id is None:
+        print(f"WARNING: Could not find '{TEAMUP_STUDIO_SUBCALENDAR_NAME}' subcalendar — using hardcoded ID.")
+        studio_id = TEAMUP_STUDIO_ID
+    return visuals_id, editing_id, studio_id
 def get_events_for_date(target_date, subcalendar_id):
     """Fetch all events from the Visuals subcalendar for a given date."""
     headers = {"Teamup-Token": TEAMUP_API_KEY}
@@ -481,7 +489,7 @@ def build_day_edits_lines(d, editing_subcalendar_id, weekend=False):
     if weekend:
         return [format_weekend_event_line(e) for e in edits_sorted]
     return [format_event_line(e) for e in edits_sorted]
-def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=None):
+def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=None, studio_subcalendar_id=None):
     """
     Build the full draft message for one or more target dates.
     Returns a string ready to post to Slack.
@@ -532,6 +540,8 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         lines += build_day_jobs_section(sun, subcalendar_id, weekend=True)
         lines.append("")
+        lines.append("_(Add your notes / editorial context here)_")
+        lines.append("")
         # ── Monday ────────────────────────────────────────────────────────────
         mon = target_dates[2]
         lines.append(format_day_header(mon))
@@ -546,7 +556,15 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
         lines.append("")
+        lines.append("_(Add your notes / editorial context here)_")
+        lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
+        if studio_subcalendar_id is not None:
+            mon_studio = build_day_edits_lines(mon, studio_subcalendar_id)
+            if mon_studio:
+                lines.append("")
+                lines.append("*Studio Bookings:*")
+                lines += mon_studio
         if editing_subcalendar_id is not None:
             mon_edits = build_day_edits_lines(mon, editing_subcalendar_id)
             if mon_edits:
@@ -567,10 +585,20 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
     lines.append("")
+    # -- Editorial notes placeholder (weekday only — Friday has it per-day above)
+    if len(target_dates) == 1:
+        lines.append("_(Add your notes / editorial context here)_")
+        lines.append("")
     # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
     if len(target_dates) == 1:
         d = target_dates[0]
         lines += build_day_jobs_section(d, subcalendar_id, weekend=False)
+        if studio_subcalendar_id is not None:
+            studio_lines = build_day_edits_lines(d, studio_subcalendar_id)
+            if studio_lines:
+                lines.append("")
+                lines.append("*Studio Bookings:*")
+                lines += studio_lines
         if editing_subcalendar_id is not None:
             edit_lines = build_day_edits_lines(d, editing_subcalendar_id)
             if edit_lines:
@@ -621,12 +649,12 @@ def post_to_slack(message, channel):
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 def main():
+    # ── TIME GUARD ─────────────────────────────────────────────────────────────
+    # Two cron entries in daily-draft.yml cover NZST and NZDT, but both fire
+    # every day. We only want to post during the 5pm hour NZ time — the other
+    # trigger lands outside that window and exits silently.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-
-    # ── TIME GUARD ─────────────────────────────────────────────────────────────
-    # Two cron entries cover NZST and NZDT — only one fires at the right time.
-    # We skip runs outside the 5pm hour, but allow manual runs through always.
     is_scheduled = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
     if is_scheduled and now_nz.hour != 17:
         print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
@@ -662,12 +690,13 @@ def main():
         print(f"Generating draft for: {target_dates[0].strftime('%A %-d %B')}")
     # Find the Visuals and Editing subcalendars
     print("Connecting to TeamUp...")
-    visuals_id, editing_id = get_subcalendar_ids()
+    visuals_id, editing_id, studio_id = get_subcalendar_ids()
     print(f"✓ Found '{TEAMUP_SUBCALENDAR_NAME}' subcalendar (ID: {visuals_id})")
     if editing_id:
         print(f"✓ Found '{TEAMUP_EDITING_SUBCALENDAR_NAME}' subcalendar (ID: {editing_id})")
+    print(f"✓ Found Video Studio subcalendar (ID: {studio_id})")
     # Build and post the message
-    message = build_draft_message(target_dates, visuals_id, editing_id)
+    message = build_draft_message(target_dates, visuals_id, editing_id, studio_id)
     post_to_slack(message, SLACK_STAGING_CHANNEL)
 if __name__ == "__main__":
     main()
