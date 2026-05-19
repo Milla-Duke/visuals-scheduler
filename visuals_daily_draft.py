@@ -39,6 +39,8 @@ TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
 TEAMUP_STUDIO_SUBCALENDAR_NAME  = "NZME Departments > Video Studio"        # Studio bookings subcalendar
 TEAMUP_STUDIO_ID                = 11087384
+TEAMUP_STUDIO_CALENDAR_KEY      = "q1rqrs"                                  # Different calendar to Visuals
+TEAMUP_STUDIO_BASE_URL          = f"https://api.teamup.com/q1rqrs"
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_STAGING_CHANNEL = "visuals-daily-schedule-message-drafts"
@@ -314,8 +316,10 @@ def get_subcalendar_ids():
         print(f"WARNING: Could not find '{TEAMUP_STUDIO_SUBCALENDAR_NAME}' subcalendar — using hardcoded ID.")
         studio_id = TEAMUP_STUDIO_ID
     return visuals_id, editing_id, studio_id
-def get_events_for_date(target_date, subcalendar_id):
-    """Fetch all events from the Visuals subcalendar for a given date."""
+def get_events_for_date(target_date, subcalendar_id, base_url=None):
+    """Fetch all events from a subcalendar for a given date."""
+    if base_url is None:
+        base_url = TEAMUP_BASE_URL
     headers = {"Teamup-Token": TEAMUP_API_KEY}
     date_str = target_date.strftime("%Y-%m-%d")
     params = {
@@ -324,12 +328,16 @@ def get_events_for_date(target_date, subcalendar_id):
         "subcalendarId[]": subcalendar_id,
     }
     try:
-        resp = requests.get(f"{TEAMUP_BASE_URL}/events", headers=headers, params=params, timeout=10)
+        resp = requests.get(f"{base_url}/events", headers=headers, params=params, timeout=10)
         resp.raise_for_status()
     except requests.RequestException as e:
         print(f"ERROR: Could not fetch events for {date_str}: {e}")
         return []
     return resp.json().get("events", [])
+
+def get_studio_events_for_date(target_date):
+    """Fetch Video Studio events using the Studio calendar key."""
+    return get_events_for_date(target_date, TEAMUP_STUDIO_ID, base_url=TEAMUP_STUDIO_BASE_URL)
 # ═══════════════════════════════════════════════════════════════════════════════
 # FORMATTING HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -560,11 +568,12 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
         if studio_subcalendar_id is not None:
-            mon_studio = build_day_edits_lines(mon, studio_subcalendar_id)
-            if mon_studio:
+            mon_studio_events = get_studio_events_for_date(mon)
+            mon_studio_sorted = sorted(mon_studio_events, key=lambda e: e.get("start_dt", ""))
+            if mon_studio_sorted:
                 lines.append("")
                 lines.append("*Studio Bookings:*")
-                lines += mon_studio
+                lines += [format_event_line(e) for e in mon_studio_sorted]
         if editing_subcalendar_id is not None:
             mon_edits = build_day_edits_lines(mon, editing_subcalendar_id)
             if mon_edits:
@@ -594,11 +603,12 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         d = target_dates[0]
         lines += build_day_jobs_section(d, subcalendar_id, weekend=False)
         if studio_subcalendar_id is not None:
-            studio_lines = build_day_edits_lines(d, studio_subcalendar_id)
-            if studio_lines:
+            studio_events = get_studio_events_for_date(d)
+            studio_sorted = sorted(studio_events, key=lambda e: e.get("start_dt", ""))
+            if studio_sorted:
                 lines.append("")
                 lines.append("*Studio Bookings:*")
-                lines += studio_lines
+                lines += [format_event_line(e) for e in studio_sorted]
         if editing_subcalendar_id is not None:
             edit_lines = build_day_edits_lines(d, editing_subcalendar_id)
             if edit_lines:
