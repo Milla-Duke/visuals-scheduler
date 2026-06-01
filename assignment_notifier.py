@@ -271,7 +271,7 @@ def main():
         print(f"  Photographer assigned: {who}")
 
         # Format the confirmation message
-        event_link  = f"https://teamup.com/events/{event_id}"
+        event_link  = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         date_clause = f" on {format_dt(start_dt)}" if start_dt else ""
         who_mention = slack_mention(who)
         # Tag all mentioned people in the message so they get notified
