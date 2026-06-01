@@ -339,7 +339,7 @@ def format_event_line(event, skip_time=False):
         names = [n.strip() for n in who.split(",") if n.strip()]
         mention = " ".join(slack_mention(n) for n in names) + " "
     if event_id:
-        link = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
+        link = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         job_text = f"<{link}|{title}>"
     else:
         job_text = title
