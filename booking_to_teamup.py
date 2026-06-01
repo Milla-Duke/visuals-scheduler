@@ -544,7 +544,7 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
 
     if event:
         event_id   = event.get("id", "")
-        event_link = f"https://teamup.com/events/{event_id}"
+        event_link = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         print(f"  TeamUp entry created: {event_link}")
 
         # Store in Redis so assignment_notifier.py can send confirmation messages
