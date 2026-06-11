@@ -1,19 +1,12 @@
 name: Booking Checker
 
 on:
-  # Runs every 2 minutes on weekdays — primary reliable trigger.
   schedule:
     - cron: '*/2 * * * 1-5'
-
-  # Also fired by Vercel when a message arrives in #visual-crew-bookings
-  # (when Vercel can reach GitHub, this fires instantly).
   repository_dispatch:
     types: [booking-received]
-
-  # MANUAL: lets you trigger a run from the GitHub Actions tab if needed
   workflow_dispatch:
 
-# Prevent two runs from processing the same messages simultaneously.
 concurrency:
   group: booking-checker
   cancel-in-progress: false
@@ -56,11 +49,3 @@ jobs:
         with:
           path: processed_bookings.json
           key: processed-bookings-${{ github.run_id }}
-
-      - name: Commit processed_bookings.json to repo
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add processed_bookings.json
-          git diff --staged --quiet || git commit -m "Update processed_bookings.json [skip ci]"
-          git push
