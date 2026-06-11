@@ -154,6 +154,22 @@ def save_processed(processed):
     with open(_PROCESSED_PATH, "w") as f:
         json.dump({"processed": list(processed)}, f, indent=2)
 
+def _store_booking(event_id, booking_data):
+    """
+    Store booking metadata in processed_bookings.json so the assignment
+    notifier can look it up when a photographer is assigned in TeamUp.
+    """
+    try:
+        with open(_PROCESSED_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    bookings = data.get("bookings", {})
+    bookings[event_id] = booking_data
+    data["bookings"] = bookings
+    with open(_PROCESSED_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SLACK HELPERS
@@ -547,21 +563,19 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
         event_link = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         print(f"  TeamUp entry created: {event_link}")
 
-        # Store in Redis so assignment_notifier.py can send confirmation messages
+        # Store booking metadata in processed_bookings.json so
+        # assignment_notifier.py can send confirmation messages when
+        # a photographer is assigned in TeamUp.
         mention_ids = extract_mention_ids(text)
-        redis_key   = f"booking:{event_id}"
-        stored = redis_set(redis_key, {
-            "slack_ts":    ts,
-            "channel_id":  channel_id,
-            "mention_ids": mention_ids,
-            "title":       title,
-            "confirmed":   False,
-            "stored_at":   datetime.now(AUCKLAND_TZ).isoformat(),
+        _store_booking(str(event_id), {
+            "slack_ts":     ts,
+            "channel_id":   channel_id,
+            "mention_ids":  mention_ids,
+            "title":        title,
+            "last_assigned": "",
+            "stored_at":    datetime.now(AUCKLAND_TZ).isoformat(),
         })
-        if stored:
-            print(f"  Stored booking in Redis: {redis_key} -> mentions {mention_ids}")
-        else:
-            print(f"  WARNING: Could not store booking in Redis for event {event_id}")
+        print(f"  Stored booking: event {event_id} -> mentions {mention_ids}")
 
         if not start_dt:
             date_note = (
