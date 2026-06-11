@@ -226,9 +226,11 @@ def main():
             print(f"  {key}: could not read from Redis")
             continue
 
-        # Skip already confirmed bookings
-        if booking.get("confirmed"):
-            continue
+        # Skip if confirmed AND photographer hasn't changed
+        last_assigned = booking.get("last_assigned", "")
+        if booking.get("confirmed") and last_assigned:
+            # Will check for changes after fetching the event
+            pass
 
         event_id   = key.replace("booking:", "")
         slack_ts   = booking.get("slack_ts")
