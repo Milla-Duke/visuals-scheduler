@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: bookings-file
+  group: booking-checker
   cancel-in-progress: false
 
 permissions:
@@ -57,6 +57,35 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout origin/main -- processed_bookings.json
+          python3 - <<'PYEOF'
+import json
+
+# Load the version from origin (has assignment notifier's confirmed flags)
+with open('processed_bookings.json') as f:
+    origin = json.load(f)
+
+# Load the cache version (has the latest processed ts list)
+import subprocess
+cache_content = subprocess.run(['git', 'show', 'HEAD:processed_bookings.json'], 
+    capture_output=True, text=True)
+if cache_content.returncode == 0:
+    cache = json.load(__import__('io').StringIO(cache_content.stdout))
+    # Merge: use origin's bookings (has confirmed flags), but update processed list
+    origin['processed'] = list(set(origin.get('processed', []) + cache.get('processed', [])))
+    # Merge bookings: origin wins for confirmed/last_assigned, cache adds new entries
+    cache_bookings = cache.get('bookings', {})
+    origin_bookings = origin.get('bookings', {})
+    for event_id, booking in cache_bookings.items():
+        if event_id not in origin_bookings:
+            origin_bookings[event_id] = booking
+    origin['bookings'] = origin_bookings
+
+with open('processed_bookings.json', 'w') as f:
+    json.dump(origin, f, indent=2)
+print("Merged successfully")
+PYEOF
           git add processed_bookings.json
           git diff --staged --quiet || git commit -m "Update processed_bookings.json [skip ci]"
-          git push origin HEAD:main --force
+          git push origin HEAD:main
