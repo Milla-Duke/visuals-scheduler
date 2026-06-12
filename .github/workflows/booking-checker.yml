@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: booking-checker
+  group: bookings-file
   cancel-in-progress: false
 
 permissions:
