@@ -2,8 +2,8 @@
 """
 Assignment Notifier
 ====================
-Checks Redis for unconfirmed bookings, looks up the corresponding TeamUp
-event to see if a photographer has been assigned (who field populated),
+Checks processed_bookings.json for unconfirmed bookings, looks up the
+corresponding TeamUp event to see if a photographer has been assigned,
 and sends a Slack confirmation message if so.
 
 Runs every 2 minutes via cron-job.org (assignment-notifier.yml).
@@ -18,13 +18,18 @@ import json
 import requests
 from datetime import datetime, timezone
 
-SLACK_BOT_TOKEN          = os.environ.get("SLACK_BOT_TOKEN", "")
-TEAMUP_API_KEY           = os.environ.get("TEAMUP_API_KEY", "")
-UPSTASH_REDIS_REST_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
-UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+TEAMUP_API_KEY  = os.environ.get("TEAMUP_API_KEY", "")
 
 TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_BASE_URL     = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
+
+_SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
+_BOOKINGS_PATH = os.path.join(_SCRIPT_DIR, "processed_bookings.json")
+
+# Only notify for bookings stored on or after this date
+# Prevents old entries from triggering notifications after a reset
+NOTIFY_FROM_DATE = "2026-06-12"
 
 NAME_TO_SLACK_ID = {
     "Corey Fleming":       "U05MSEE6CLE",
@@ -63,58 +68,26 @@ def slack_mention(name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# REDIS HELPERS
+# BOOKINGS FILE HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def redis_get(key):
-    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
-    resp = requests.get(
-        f"{UPSTASH_REDIS_REST_URL}/get/{key}",
-        headers=headers, timeout=10
-    )
-    data = resp.json()
-    result = data.get("result")
-    if not result:
-        return None
+def load_bookings():
     try:
-        parsed = json.loads(result)
-        if isinstance(parsed, list):
-            print(f"  WARNING: Redis key {key} is malformed (list) — deleting")
-            redis_delete(key)
-            return None
-        return parsed
-    except (json.JSONDecodeError, TypeError):
-        return result
+        with open(_BOOKINGS_PATH) as f:
+            data = json.load(f)
+        return data.get("bookings", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
 
-def redis_set(key, value, ex_seconds=7776000):
-    headers = {
-        "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(
-        f"{UPSTASH_REDIS_REST_URL}/pipeline",
-        headers=headers,
-        json=[["SET", key, json.dumps(value), "EX", ex_seconds]],
-        timeout=10,
-    )
-    results = resp.json()
-    return isinstance(results, list) and results[0].get("result") == "OK"
-
-def redis_delete(key):
-    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
-    requests.get(
-        f"{UPSTASH_REDIS_REST_URL}/del/{key}",
-        headers=headers, timeout=10
-    )
-
-def redis_keys(pattern):
-    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
-    resp = requests.get(
-        f"{UPSTASH_REDIS_REST_URL}/keys/{pattern}",
-        headers=headers, timeout=10
-    )
-    data = resp.json()
-    return data.get("result", [])
+def save_bookings(bookings):
+    try:
+        with open(_BOOKINGS_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    data["bookings"] = bookings
+    with open(_BOOKINGS_PATH, "w") as f:
+        json.dump(data, f, indent=2)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -140,11 +113,7 @@ def post_slack_message(channel, text, thread_ts=None):
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
         "Content-Type": "application/json",
     }
-    payload = {
-        "channel": channel,
-        "text": text,
-        "unfurl_links": False,
-    }
+    payload = {"channel": channel, "text": text, "unfurl_links": False}
     if thread_ts:
         payload["thread_ts"] = thread_ts
     resp = requests.post(
@@ -179,49 +148,35 @@ def main():
     if not TEAMUP_API_KEY:
         print("ERROR: No TEAMUP_API_KEY")
         sys.exit(1)
-    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
-        print("ERROR: No Upstash Redis credentials")
-        sys.exit(1)
 
-    keys = redis_keys("booking:*")
-    print(f"Found {len(keys)} booking(s) in Redis")
+    bookings = load_bookings()
+    print(f"Found {len(bookings)} booking(s) in processed_bookings.json")
 
+    changed = False
     confirmed_count = 0
 
-    for key in keys:
-        booking = redis_get(key)
-        if not booking:
-            print(f"  {key}: could not read from Redis")
+    for event_id, booking in list(bookings.items()):
+
+        # Only process bookings created on or after NOTIFY_FROM_DATE
+        stored_at = booking.get("stored_at", "")
+        if not stored_at or stored_at[:10] < NOTIFY_FROM_DATE:
             continue
 
-        if booking.get("confirmed"):
-            continue
-
-        event_id    = key.replace("booking:", "")
+        title       = booking.get("title", "your job")
         slack_ts    = booking.get("slack_ts")
         channel_id  = booking.get("channel_id")
         mention_ids = booking.get("mention_ids", [])
-        title       = booking.get("title", "your job")
+        last_assigned = booking.get("last_assigned", "")
+
+        # Skip if already confirmed and photographer unchanged
+        if last_assigned and booking.get("confirmed"):
+            continue
 
         print(f"\n  Checking event {event_id} ({title})")
 
-        # Auto-cleanup: remove bookings older than 30 days
-        stored_at = booking.get("stored_at", "")
-        if stored_at:
-            try:
-                stored_dt = datetime.fromisoformat(stored_at)
-                age_days = (datetime.now(timezone.utc) - stored_dt).days
-                if age_days > 30:
-                    print(f"  Booking is {age_days} days old — removing from Redis")
-                    redis_delete(key)
-                    continue
-            except Exception:
-                pass
-
         event = get_teamup_event(event_id)
         if not event:
-            print(f"  Could not fetch TeamUp event {event_id} — removing from Redis")
-            redis_delete(key)
+            print(f"  Could not fetch TeamUp event {event_id} — skipping")
             continue
 
         who      = (event.get("who") or "").strip()
@@ -231,28 +186,43 @@ def main():
             print(f"  No photographer assigned yet — skipping")
             continue
 
+        if last_assigned == who:
+            print(f"  Already notified for {who} — skipping")
+            # Mark confirmed so we stop checking
+            booking["confirmed"] = True
+            changed = True
+            continue
+
         print(f"  Photographer assigned: {who}")
 
         event_link   = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
         who_mention  = slack_mention(who)
         mentions_str = " ".join(f"<@{uid}>" for uid in mention_ids) if mention_ids else ""
-        confirm_msg  = f"\u2705 {mentions_str} {who_mention} has been assigned to your job \u2014 <{event_link}|{title}>{date_clause}".strip()
+
+        if last_assigned:
+            prev_mention = slack_mention(last_assigned)
+            msg = f"\U0001f504 *Update:* {mentions_str} {who_mention} has been assigned to your job \u2014 <{event_link}|{title}>{date_clause} _(previously: {prev_mention})_".strip()
+        else:
+            msg = f"\u2705 {mentions_str} {who_mention} has been assigned to your job \u2014 <{event_link}|{title}>{date_clause}".strip()
 
         if channel_id and slack_ts:
-            ok = post_slack_message(channel_id, confirm_msg, thread_ts=slack_ts)
+            ok = post_slack_message(channel_id, msg, thread_ts=slack_ts)
             if ok:
-                print(f"  \u2713 Thread reply sent to {channel_id}")
+                print(f"  \u2713 Thread reply sent")
 
         for user_id in mention_ids:
-            ok = post_slack_message(user_id, confirm_msg)
+            ok = post_slack_message(user_id, msg)
             if ok:
                 print(f"  \u2713 DM sent to {user_id}")
 
         booking["confirmed"] = True
-        redis_set(key, booking)
-        print(f"  \u2713 Marked as confirmed in Redis")
+        booking["last_assigned"] = who
+        changed = True
         confirmed_count += 1
+
+    if changed:
+        save_bookings(bookings)
 
     if confirmed_count:
         print(f"\n\u2713 Sent {confirmed_count} assignment notification(s).")
