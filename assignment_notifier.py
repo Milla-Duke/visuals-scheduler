@@ -165,7 +165,7 @@ def main():
         title       = booking.get("title", "your job")
         slack_ts    = booking.get("slack_ts")
         channel_id  = booking.get("channel_id")
-        mention_ids = booking.get("mention_ids", [])
+        mention_ids = list(dict.fromkeys(booking.get("mention_ids", [])))  # deduplicate
         last_assigned = booking.get("last_assigned", "")
 
         # Skip if already confirmed and photographer unchanged
