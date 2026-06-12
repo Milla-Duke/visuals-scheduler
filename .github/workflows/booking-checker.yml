@@ -59,8 +59,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout origin/main -- processed_bookings.json
-          python3 - <<'PYEOF'
-import json
+          python3  - <<'PYEOF' import json ^^^^^^^^^^^
 
 # Load the version from origin (has assignment notifier's confirmed flags)
 with open('processed_bookings.json') as f:
