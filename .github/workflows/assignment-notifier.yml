@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: assignment-notifier
+  group: bookings-file
   cancel-in-progress: false
 
 permissions:
