@@ -1,12 +1,16 @@
 name: Assignment Notifier
 
 on:
-  # Triggered by Vercel when TeamUp webhook fires with a photographer assigned
-  repository_dispatch:
-    types: [assignment-check]
-
-  # Manual trigger from the GitHub Actions tab if needed
+  schedule:
+    - cron: '*/2 * * * *'
   workflow_dispatch:
+
+concurrency:
+  group: assignment-notifier
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   notify-assignments:
@@ -17,6 +21,8 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,6 +36,12 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
-          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
-          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python assignment_notifier.py
+
+      - name: Commit processed_bookings.json to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add processed_bookings.json
+          git diff --staged --quiet || git commit -m "Update processed_bookings.json [skip ci]"
+          git push origin HEAD:main --force
