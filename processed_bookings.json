@@ -231,8 +231,9 @@
         "U4BV744Q5"
       ],
       "title": "test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:02:25.672239+12:00"
+      "last_assigned": "Ella Wilks",
+      "stored_at": "2026-06-13T05:02:25.672239+12:00",
+      "confirmed": true
     },
     "2113693542": {
       "slack_ts": "1781284517.478079",
@@ -241,8 +242,9 @@
         "U4BV744Q5"
       ],
       "title": "test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:16:23.099491+12:00"
+      "last_assigned": "Michael Craig",
+      "stored_at": "2026-06-13T05:16:23.099491+12:00",
+      "confirmed": true
     },
     "2113700688": {
       "slack_ts": "1781285527.269189",
@@ -251,8 +253,9 @@
         "U4BV744Q5"
       ],
       "title": "test new",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:32:28.122084+12:00"
+      "last_assigned": "Ella Wilks",
+      "stored_at": "2026-06-13T05:32:28.122084+12:00",
+      "confirmed": true
     },
     "2113723525": {
       "slack_ts": "1781288586.730199",
@@ -261,8 +264,9 @@
         "U4BV744Q5"
       ],
       "title": "final test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T06:24:24.940987+12:00"
+      "last_assigned": "Michael Craig",
+      "stored_at": "2026-06-13T06:24:24.940987+12:00",
+      "confirmed": true
     }
   }
 }
