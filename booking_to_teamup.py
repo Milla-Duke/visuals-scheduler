@@ -151,8 +151,15 @@ def load_processed():
         return set()
 
 def save_processed(processed):
+    # Read existing data first to preserve the bookings section
+    try:
+        with open(_PROCESSED_PATH) as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
+    data["processed"] = list(processed)
     with open(_PROCESSED_PATH, "w") as f:
-        json.dump({"processed": list(processed)}, f, indent=2)
+        json.dump(data, f, indent=2)
 
 def _store_booking(event_id, booking_data):
     """
