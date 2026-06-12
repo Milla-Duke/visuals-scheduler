@@ -229,8 +229,9 @@
         "U4BV744Q5"
       ],
       "title": "test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:02:25.672239+12:00"
+      "last_assigned": "Ella Wilks",
+      "stored_at": "2026-06-13T05:02:25.672239+12:00",
+      "confirmed": true
     },
     "2113693542": {
       "slack_ts": "1781284517.478079",
@@ -239,8 +240,9 @@
         "U4BV744Q5"
       ],
       "title": "test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:16:23.099491+12:00"
+      "last_assigned": "Michael Craig",
+      "stored_at": "2026-06-13T05:16:23.099491+12:00",
+      "confirmed": true
     }
   }
 }
