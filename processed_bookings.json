@@ -214,22 +214,19 @@
     "2113673268": {
       "slack_ts": "1781282147.534419",
       "channel_id": "C4NE34YMD",
-      "mention_ids": [
-        "U4BV744Q5"
-      ],
+      "mention_ids": ["U4BV744Q5"],
       "title": "test",
-      "last_assigned": "",
+      "last_assigned": "Dean Purcell",
+      "confirmed": true,
       "stored_at": "2026-06-13T04:36:25.295859+12:00"
     },
     "2113687415": {
       "slack_ts": "1781283674.844389",
       "channel_id": "C4NE34YMD",
-      "mention_ids": [
-        "U4BV744Q5"
-      ],
+      "mention_ids": ["U4BV744Q5"],
       "title": "test",
-      "last_assigned": "",
+      "last_assigned": "Dean Purcell",
+      "confirmed": true,
       "stored_at": "2026-06-13T05:02:25.672239+12:00"
     }
   }
-}
