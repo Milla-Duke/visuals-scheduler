@@ -11,6 +11,9 @@ concurrency:
   group: booking-checker
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   check-bookings:
     runs-on: ubuntu-latest
@@ -20,6 +23,8 @@ jobs:
     steps:
       - name: Check out the repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Restore processed bookings cache
         uses: actions/cache@v4
@@ -40,8 +45,6 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
-          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
-          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python booking_to_teamup.py
 
       - name: Save processed bookings cache
@@ -49,3 +52,12 @@ jobs:
         with:
           path: processed_bookings.json
           key: processed-bookings-${{ github.run_id }}
+
+      - name: Commit processed_bookings.json to repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase
+          git add processed_bookings.json
+          git diff --staged --quiet || git commit -m "Update processed_bookings.json [skip ci]"
+          git push
