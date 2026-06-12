@@ -228,8 +228,9 @@
         "U4BV744Q5"
       ],
       "title": "test",
-      "last_assigned": "",
-      "stored_at": "2026-06-13T05:02:25.672239+12:00"
+      "last_assigned": "Ella Wilks",
+      "stored_at": "2026-06-13T05:02:25.672239+12:00",
+      "confirmed": true
     }
   }
 }
