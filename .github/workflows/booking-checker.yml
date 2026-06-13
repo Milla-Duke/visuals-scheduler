@@ -58,6 +58,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
+          git checkout origin/main -- merge_bookings.py
           python3 merge_bookings.py
           git add processed_bookings.json
           git diff --staged --quiet || git commit -m "Update processed_bookings.json [skip ci]"
