@@ -16,7 +16,7 @@ import os
 import sys
 import json
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 SLACK_BOT_TOKEN          = os.environ.get("SLACK_BOT_TOKEN", "")
 TEAMUP_API_KEY           = os.environ.get("TEAMUP_API_KEY", "")
@@ -141,6 +141,38 @@ def format_dt(dt_string):
     except Exception:
         return dt_string
 
+def compute_ttl_seconds(start_dt_str, fallback_days=14, buffer_days=3, minimum_days=1):
+    """
+    Work out how long a booking record should live in Redis after we've
+    just sent (or re-sent) an assignment notification for it.
+
+    - If the job's start date/time can be parsed, TTL = (job date + buffer_days) - now.
+    - If that's already in the past, or start_dt is missing/unparseable,
+      fall back to fallback_days from now.
+    - Never returns less than minimum_days, so a record always survives at
+      least that long (covers same-day or past-dated jobs).
+    """
+    now = datetime.now(timezone.utc)
+    fallback_seconds = fallback_days * 24 * 60 * 60
+    minimum_seconds  = minimum_days * 24 * 60 * 60
+
+    if start_dt_str:
+        job_date = None
+        try:
+            job_date = datetime.fromisoformat(start_dt_str)
+        except ValueError:
+            try:
+                job_date = datetime.strptime(start_dt_str, "%Y-%m-%d")
+            except ValueError:
+                job_date = None
+        if job_date is not None:
+            if job_date.tzinfo is None:
+                job_date = job_date.replace(tzinfo=timezone.utc)
+            remaining = (job_date + timedelta(days=buffer_days) - now).total_seconds()
+            return int(max(remaining, minimum_seconds))
+
+    return max(fallback_seconds, minimum_seconds)
+
 def main():
     print(f"Assignment notifier — {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -161,14 +193,12 @@ def main():
         if not booking:
             continue
 
-        if booking.get("confirmed"):
-            continue
-
-        event_id    = key.replace("booking:", "")
-        slack_ts    = booking.get("slack_ts")
-        channel_id  = booking.get("channel_id")
-        mention_ids = booking.get("mention_ids", [])
-        title       = booking.get("title", "your job")
+        event_id      = key.replace("booking:", "")
+        slack_ts      = booking.get("slack_ts")
+        channel_id    = booking.get("channel_id")
+        mention_ids   = booking.get("mention_ids", [])
+        title         = booking.get("title", "your job")
+        last_assigned = booking.get("last_assigned")
 
         print(f"\n  Checking event {event_id} ({title})")
 
@@ -197,7 +227,26 @@ def main():
             print(f"  No photographer assigned yet — skipping")
             continue
 
-        print(f"  Photographer assigned: {who}")
+        if "last_assigned" not in booking:
+            # Pre-migration record (created before last_assigned tracking existed).
+            # We can't know whether a notification was already sent for the
+            # CURRENT assignment under the old delete-on-send logic, so adopt
+            # it as the baseline WITHOUT notifying. Only a future change of
+            # assignment will trigger a message from here on.
+            booking["last_assigned"] = who
+            booking["confirmed"] = True
+            ttl = compute_ttl_seconds(start_dt)
+            if redis_set(key, booking, ex_seconds=ttl):
+                print(f"  Pre-existing record migrated — baseline set to '{who}', no notification sent (TTL {ttl}s)")
+            else:
+                print(f"  WARNING: Could not migrate Redis record for {event_id}")
+            continue
+
+        if who == last_assigned:
+            print(f"  Already notified for current assignment ({who}) — skipping")
+            continue
+
+        print(f"  Photographer assigned: {who} (previously: {last_assigned or 'none'})")
 
         event_link   = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
@@ -215,9 +264,17 @@ def main():
             if ok:
                 print(f"  \u2713 DM sent to {user_id}")
 
-        # Delete from Redis once confirmed — reduces key scan cost on future runs
-        redis_delete(key)
-        print(f"  \u2713 Confirmed and removed from Redis")
+        # Record this assignment as the latest one notified, and refresh the
+        # TTL so the record sticks around long enough to catch a future
+        # re-assignment (job date + 3 days, or 14 days if no date is known).
+        booking["last_assigned"] = who
+        booking["confirmed"] = True
+        ttl = compute_ttl_seconds(start_dt)
+        if redis_set(key, booking, ex_seconds=ttl):
+            print(f"  \u2713 Updated last_assigned -> {who} (TTL {ttl}s)")
+        else:
+            print(f"  WARNING: Could not update Redis record for {event_id}")
+
         confirmed_count += 1
 
     if confirmed_count:
