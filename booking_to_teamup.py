@@ -575,12 +575,13 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
         mention_ids = extract_mention_ids(text)
         redis_key = f"booking:{event_id}"
         stored = redis_set(redis_key, {
-            "slack_ts":    ts,
-            "channel_id":  channel_id,
-            "mention_ids": mention_ids,
-            "title":       title,
-            "confirmed":   False,
-            "stored_at":   datetime.now(AUCKLAND_TZ).isoformat(),
+            "slack_ts":      ts,
+            "channel_id":    channel_id,
+            "mention_ids":   mention_ids,
+            "title":         title,
+            "confirmed":     False,
+            "last_assigned": None,
+            "stored_at":     datetime.now(AUCKLAND_TZ).isoformat(),
         })
         if stored:
             print(f"  Stored booking in Redis: {redis_key} -> mentions {mention_ids}")
