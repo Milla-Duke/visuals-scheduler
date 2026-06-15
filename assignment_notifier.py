@@ -252,7 +252,19 @@ def main():
         date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
         who_mention  = slack_mention(who)
         mentions_str = " ".join(f"<@{uid}>" for uid in mention_ids) if mention_ids else ""
-        confirm_msg  = f"\u2705 {mentions_str} {who_mention} has been assigned to your job \u2014 <{event_link}|{title}>{date_clause}".strip()
+
+        if last_assigned:
+            previous_mention = slack_mention(last_assigned)
+            confirm_msg = (
+                f"\u2705 {mentions_str} {who_mention} has now been assigned to your job "
+                f"\u2014 <{event_link}|{title}>{date_clause}. "
+                f"This was previously {previous_mention}."
+            ).strip()
+        else:
+            confirm_msg = (
+                f"\u2705 {mentions_str} {who_mention} has been assigned to your job "
+                f"\u2014 <{event_link}|{title}>{date_clause}"
+            ).strip()
 
         if channel_id and slack_ts:
             ok = post_slack_message(channel_id, confirm_msg, thread_ts=slack_ts)
