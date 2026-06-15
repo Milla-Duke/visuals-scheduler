@@ -266,8 +266,19 @@ module.exports = async function handler(req, res) {
 
     if (command === '/visuals-update') {
       // Write a flag to Redis — cron-job.org picks it up within 2 minutes
-      // and triggers the Today's Jobs workflow via /api/trigger.
+      // and triggers the appropriate workflow via /api/trigger.
       // We can't call GitHub directly from Vercel due to network restrictions.
+      const arg = (params.get('text') || '').trim().toLowerCase();
+
+      if (arg === 'monday') {
+        await redisSet('pending_monday_draft', { requested_at: new Date().toISOString() });
+        res.json({
+          response_type: 'ephemeral',
+          text: "\u23f3 Generating Monday's draft \u2014 it'll appear in *#visuals-daily-schedule-message-drafts* within a couple of minutes.",
+        });
+        return;
+      }
+
       await redisSet('pending_today_jobs', { requested_at: new Date().toISOString() });
       res.json({
         response_type: 'ephemeral',
