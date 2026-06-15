@@ -6,7 +6,8 @@
  * GitHub Actions workflow if a flag is set.
  *
  * Current flags:
- *   pending_today_jobs — set by /visuals-update slash command
+ *   pending_today_jobs   — set by /visuals-update
+ *   pending_monday_draft — set by /visuals-update monday
  *
  * Environment variables (same as slack.js):
  *   GITHUB_TOKEN              — GitHub personal access token (workflow scope)
@@ -86,16 +87,33 @@ module.exports = async function handler(req, res) {
 
   console.log('Trigger check running...');
 
+  let foundAny = false;
+
   // Check for pending today's jobs request
   const pendingTodayJobs = await redisGet('pending_today_jobs');
   if (pendingTodayJobs) {
+    foundAny = true;
     console.log(`Found pending_today_jobs flag (requested at ${pendingTodayJobs.requested_at})`);
     const ok = await triggerWorkflow('todays-jobs-trigger');
     if (ok) {
       await redisDelete('pending_today_jobs');
       console.log('Triggered todays-jobs-trigger and cleared flag');
     }
-  } else {
+  }
+
+  // Check for pending Monday draft request
+  const pendingMondayDraft = await redisGet('pending_monday_draft');
+  if (pendingMondayDraft) {
+    foundAny = true;
+    console.log(`Found pending_monday_draft flag (requested at ${pendingMondayDraft.requested_at})`);
+    const ok = await triggerWorkflow('monday-draft-trigger');
+    if (ok) {
+      await redisDelete('pending_monday_draft');
+      console.log('Triggered monday-draft-trigger and cleared flag');
+    }
+  }
+
+  if (!foundAny) {
     console.log('No pending jobs flags found');
   }
 
