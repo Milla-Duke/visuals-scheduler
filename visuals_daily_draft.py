@@ -666,8 +666,8 @@ def main():
     # trigger lands outside that window and exits silently.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-    if now_nz.hour != 17:
-        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
+    if now_nz.hour != 18:
+        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 6pm posting window.")
         sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
 
