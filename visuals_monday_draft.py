@@ -47,6 +47,7 @@ TEAMUP_API_KEY    = _config.get("teamup_api_key")  or os.environ.get("TEAMUP_API
 
 TEAMUP_CALENDAR_KEY       = "ksi7k2xr9brt5tn2ac"
 TEAMUP_VISUALS_ID         = 11087400
+TEAMUP_STUDIO_ID          = 11087384
 TEAMUP_EDITING_ID         = 12991604
 TEAMUP_BASE_URL           = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 
@@ -380,6 +381,16 @@ def build_message(monday):
             lines.append(format_event_line(e))
     else:
         lines.append("_(No jobs in diary for this day)_")
+
+    # ── Studio ─────────────────────────────────────────────────────────────────
+    studio = get_events(monday, TEAMUP_STUDIO_ID)
+    studio_sorted = sorted(studio, key=lambda e: e.get("start_dt", ""))
+
+    if studio_sorted:
+        lines.append("")
+        lines.append("*Studio:*")
+        for e in studio_sorted:
+            lines.append(format_event_line(e))
 
     # ── Edits ──────────────────────────────────────────────────────────────────
     edits = get_events(monday, TEAMUP_EDITING_ID)
