@@ -3,14 +3,9 @@
 Visuals Daily Schedule Draft Generator
 =======================================
 Fetches next day's jobs from the TeamUp Visuals calendar and posts
-a pre-formatted draft to the Slack staging channel at 5:45pm weekdays.
-SETUP:
-  1. pip install requests
-  2. Add your Slack bot token to config.json (in the same folder as this script):
-       { "slack_bot_token": "xoxb-your-token-here" }
-  3. Run manually to test:
-       python3 visuals_daily_draft.py
-  4. The Mac scheduler (install_schedule.sh) runs this automatically at 5:45pm Mon-Fri.
+a pre-formatted draft to #visuals-team-chat-24 at 6:45pm weekdays.
+Runs automatically via GitHub Actions (daily-draft.yml).
+Manual trigger: GitHub Actions tab → Daily Draft → Run workflow.
 """
 import os
 import re
