@@ -1,25 +1,17 @@
 #!/usr/bin/env python3
 """
-Visuals Monday Draft — On-Demand Monday Snapshot
-==================================================
-Posts the standard single-day draft (shift times, jobs, edits — no
-editorial notes section) for the upcoming Monday from TeamUp and
-Humanity to the Slack drafts channel.
-
-"Upcoming Monday" means today if today is Monday, otherwise the next
-Monday. This is intended for /visuals-update monday — typically run
-over the weekend (or early Monday) to refresh Monday's job list if it
-has changed since Friday's combined Sat/Sun/Mon draft went out.
+Visuals Today — On-Demand Jobs Snapshot
+=========================================
+Posts today's jobs and edits from TeamUp to the Slack drafts channel.
+Includes shift times from humanity_shifts.csv, sorted by earliest start time.
 
 Usage:
-  python3 visuals_monday_draft.py
+  python3 visuals_today.py
 
-Or trigger via GitHub Actions (repository_dispatch: monday-draft-trigger),
-fired by cron-job.org polling api/trigger.js for the pending_monday_draft
-Redis flag set by /visuals-update monday.
+Or trigger via GitHub Actions (workflow_dispatch) from the Actions tab.
 
 Requirements:
-  pip3 install requests pytz
+  pip3 install requests
 """
 
 import os
@@ -29,7 +21,7 @@ import csv
 import json
 import pytz
 import requests
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -51,8 +43,6 @@ TEAMUP_STUDIO_ID          = 11087384
 TEAMUP_EDITING_ID         = 12991604
 TEAMUP_BASE_URL           = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 
-# Posts to the drafts channel, same as visuals_today.py — NOT the
-# visuals-team-chat-24 channel the 5:45pm daily draft now posts to.
 SLACK_CHANNEL = "visuals-daily-schedule-message-drafts"
 
 NAME_TO_SLACK_ID = {
@@ -249,11 +239,6 @@ def format_time(dt_string):
         return ""
 
 
-def format_day_header(d):
-    """Format a date as a bold Slack day header, e.g. '*Monday 15 June*'."""
-    return f"*{d.strftime('%A %-d %B')}*"
-
-
 def get_events(target_date, subcalendar_id):
     """Fetch all events from a subcalendar for a given date."""
     headers = {"Teamup-Token": TEAMUP_API_KEY}
@@ -315,36 +300,23 @@ def format_event_line(event):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DATE HELPER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def get_upcoming_monday(today):
-    """
-    Return the upcoming Monday: today itself if today is Monday,
-    otherwise the next Monday.
-    """
-    days_until_monday = (7 - today.weekday()) % 7  # 0 if today is Monday
-    return today + timedelta(days=days_until_monday)
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # MESSAGE BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def build_message(monday):
-    """Build the Monday draft message — standard single-day format,
-    no editorial notes section (matches the current daily draft)."""
+def build_message(today):
+    """Build the today's jobs message in the same format as the daily draft."""
     lines = []
 
     # Load Humanity shift data
     shifts = load_humanity_shifts()
 
     # Header
-    lines.append(format_day_header(monday))
+    today_label = today.strftime("%A %-d %B")
+    lines.append(f"*{today_label} — jobs update*")
     lines.append("")
 
     # ── Visuals jobs ──────────────────────────────────────────────────────────
-    all_events = get_events(monday, TEAMUP_VISUALS_ID)
+    all_events = get_events(today, TEAMUP_VISUALS_ID)
 
     # Away names
     away_names = [
@@ -357,11 +329,11 @@ def build_message(monday):
     lines.append("")
 
     # Shift times — sorted by earliest start, skip anyone not in CSV
-    for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, monday)):
-        if (name, monday) not in shifts:
+    for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, today)):
+        if (name, today) not in shifts:
             continue  # not in CSV — skip rather than show _(time)_
         display = NAME_TO_SLACK.get(name, name)
-        lines.append(f"{display} {shift_display(shifts, name, monday)}")
+        lines.append(f"{display} {shift_display(shifts, name, today)}")
     lines.append("")
 
     # Non-away events: split into all-day (e.g. Gallery today) and timed
@@ -380,10 +352,10 @@ def build_message(monday):
         for e in timed:
             lines.append(format_event_line(e))
     else:
-        lines.append("_(No jobs in diary for this day)_")
+        lines.append("_(No jobs in diary for today)_")
 
     # ── Studio ─────────────────────────────────────────────────────────────────
-    studio = get_events(monday, TEAMUP_STUDIO_ID)
+    studio = get_events(today, TEAMUP_STUDIO_ID)
     studio_sorted = sorted(studio, key=lambda e: e.get("start_dt", ""))
 
     if studio_sorted:
@@ -392,8 +364,8 @@ def build_message(monday):
         for e in studio_sorted:
             lines.append(format_event_line(e))
 
-    # ── Edits ──────────────────────────────────────────────────════════════════
-    edits = get_events(monday, TEAMUP_EDITING_ID)
+    # ── Edits ──────────────────────────────────────────────────────────────────
+    edits = get_events(today, TEAMUP_EDITING_ID)
     edits_sorted = sorted(edits, key=lambda e: e.get("start_dt", ""))
 
     if edits_sorted:
@@ -450,9 +422,8 @@ def main():
     # Use NZ timezone — GitHub Actions runs in UTC which can be a day behind NZ
     nz = pytz.timezone("Pacific/Auckland")
     today = datetime.now(nz).date()
-    monday = get_upcoming_monday(today)
-    print(f"Fetching jobs for {monday.strftime('%A %-d %B')} (today is {today.strftime('%A %-d %B')})...")
-    message = build_message(monday)
+    print(f"Fetching today's jobs ({today.strftime('%A %-d %B')})...")
+    message = build_message(today)
     post_to_slack(message)
 
 
