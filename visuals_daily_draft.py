@@ -553,8 +553,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             lines.append("*Studio:*")
             lines += sun_studio
         lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
         # ── Monday ────────────────────────────────────────────────────────────
         mon = target_dates[2]
         lines.append(format_day_header(mon))
@@ -568,8 +566,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
                 continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, mon)}")
-        lines.append("")
-        lines.append("_(Add your notes / editorial context here)_")
         lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
         mon_studio = build_day_studio_lines(mon)
@@ -597,10 +593,6 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
             display = name_for_shift_list(name)
             lines.append(f"{display} {shift_display(shifts, name, d)}")
     lines.append("")
-    # -- Editorial notes placeholder (weekday only — Friday has it per-day above)
-    if len(target_dates) == 1:
-        lines.append("_(Add your notes / editorial context here)_")
-        lines.append("")
     # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
     if len(target_dates) == 1:
         d = target_dates[0]
