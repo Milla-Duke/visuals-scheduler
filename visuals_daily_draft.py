@@ -35,7 +35,7 @@ TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edit
 TEAMUP_STUDIO_ID = 11087384  # Video Studio subcalendar (hardcoded — not name-looked-up)
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
-SLACK_STAGING_CHANNEL = "visuals-daily-schedule-message-drafts"
+SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
 TEAMUP_BASE_URL = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 # Weekend job entries that should appear as plain links with no time
 WEEKEND_NO_TIME_TITLES = {"morning update", "morning bulletin", "afternoon bulletin"}
