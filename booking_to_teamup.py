@@ -245,6 +245,22 @@ def post_thread_reply(channel_id, thread_ts, text):
 
 FORM_FIELDS = [
     "Brief",
+    "Reporter",
+    "Date and time of job",
+    "Location",
+    "Proposed time to leave NZME for job",
+    "Will the reporter be attending?",
+    "Contact at job if reporter not attending",
+    "Visuals required",
+    "Publish time",
+    "Premium or Free?",
+    "Approving desk editor",
+]
+
+# Legacy field list — used to detect and parse old-format booking forms
+# that were submitted before the form was updated (within the 24h window).
+FORM_FIELDS_LEGACY = [
+    "Brief",
     "Job time / date",
     "Reporter's name and contact at job if different",
     "Location",
@@ -260,17 +276,33 @@ def is_booking_form(text):
     if not text:
         return False
     t = text.lower()
+    # New form: plain labels (no asterisks), new field names
+    if "brief" in t and "date and time of job" in t:
+        return True
+    # Old form: bold asterisk labels
+    if "*brief*" in t and "*job time" in t:
+        return True
+    return False
+
+def _is_legacy_form(text):
+    """Return True if this looks like the old bold-asterisk format."""
+    t = text.lower()
     return "*brief*" in t and "*job time" in t
 
 def extract_mention_ids(text):
     return list(dict.fromkeys(re.findall(r'<@([A-Z0-9]+)>', text)))
 
-def extract_field(text, field_name):
-    next_fields = "|".join(re.escape(f) for f in FORM_FIELDS if f != field_name)
-    pattern = rf"\*{re.escape(field_name)}\??\*\s*\n(.*?)(?=\*(?:{next_fields})\??\*|$)"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
-    if match:
-        value = match.group(1).strip()
+def extract_field(text, field_name, fields_list=None):
+    """
+    Extract a field value from the booking form message.
+    Handles both formats:
+      New: plain label on one line, value on the next
+      Old: *Bold label* on one line, value on the next
+    """
+    if fields_list is None:
+        fields_list = FORM_FIELDS
+
+    def _clean(value):
         value = re.sub(r'<@[A-Z0-9]+\|([^>]+)>', r'@\1', value)
         def _replace_bare_mention(m):
             uid = m.group(1)
@@ -280,6 +312,21 @@ def extract_field(text, field_name):
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
         return value.strip()
+
+    next_fields = "|".join(re.escape(f) for f in fields_list if f != field_name)
+
+    # Try new format first: plain label (optionally bold via asterisks), value on next line
+    pattern_new = rf"(?:^|\n)\*?{re.escape(field_name)}\??\*?\s*\n(.*?)(?=\n\*?(?:{next_fields})\??\*?\s*\n|$)"
+    match = re.search(pattern_new, text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return _clean(match.group(1).strip())
+
+    # Fall back to old bold format: *Field name* then value
+    pattern_old = rf"\*{re.escape(field_name)}\??\*\s*\n(.*?)(?=\*(?:{next_fields})\??\*|$)"
+    match = re.search(pattern_old, text, re.DOTALL | re.IGNORECASE)
+    if match:
+        return _clean(match.group(1).strip())
+
     return ""
 
 def get_title(brief_text):
@@ -404,9 +451,11 @@ def parse_datetime(date_str):
     return parsed, parsed + timedelta(hours=DEFAULT_DURATION_HOURS)
 
 def form_to_html(raw_text):
+    # Use legacy fields list for old-format forms, new fields for new format
+    fields = FORM_FIELDS_LEGACY if _is_legacy_form(raw_text) else FORM_FIELDS
     parts = ["<p>"]
-    for field in FORM_FIELDS:
-        value = extract_field(raw_text, field)
+    for field in fields:
+        value = extract_field(raw_text, field, fields_list=fields)
         if value:
             value_html = (
                 value
@@ -529,11 +578,21 @@ def process_message(msg, channel_id, processed):
         return False
     if is_booking_form(text):
         print(f"\n  New booking form found (ts: {ts})")
+        if _is_legacy_form(text):
+            # Old bold-asterisk format — use legacy field names
+            date_fn = lambda t: extract_field(t, "Job time / date", fields_list=FORM_FIELDS_LEGACY)
+            loc_fn  = lambda t: extract_field(t, "Location", fields_list=FORM_FIELDS_LEGACY)
+            ttl_fn  = lambda t: get_title(extract_field(t, "Brief", fields_list=FORM_FIELDS_LEGACY))
+        else:
+            # New format — use new field names
+            date_fn = lambda t: extract_field(t, "Date and time of job")
+            loc_fn  = lambda t: extract_field(t, "Location")
+            ttl_fn  = lambda t: get_title(extract_field(t, "Brief"))
         return _process_form(
             ts, text, channel_id, processed,
-            title_fn=lambda t: get_title(extract_field(t, "Brief")),
-            date_fn=lambda t: extract_field(t, "Job time / date"),
-            location_fn=lambda t: extract_field(t, "Location"),
+            title_fn=ttl_fn,
+            date_fn=date_fn,
+            location_fn=loc_fn,
             notes_fn=form_to_html,
             label="booking",
         )
