@@ -45,7 +45,7 @@ except (FileNotFoundError, json.JSONDecodeError):
 SLACK_BOT_TOKEN   = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 TEAMUP_API_KEY    = _config.get("teamup_api_key")  or os.environ.get("TEAMUP_API_KEY", "")
 
-TEAMUP_CALENDAR_KEY       = "kst9nsuiivko3ujo1r"
+TEAMUP_CALENDAR_KEY       = "ksi7k2xr9brt5tn2ac"
 TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_STUDIO_ID          = 11087384
 TEAMUP_EDITING_ID         = 12991604
@@ -72,6 +72,7 @@ NAME_TO_SLACK_ID = {
     "Mark Mitchell":       "U4AJQH95Y",
     "Ella Wilks":          "U4BV744Q5",
     "Hayden Woodward":     "U03R4TRKTRR",
+    "Emma Tavai":          "U0BFVEELEP3",
     "Michael Morrah":      "U07B4DXQ95H",
     "Sarah Bristow":       "U07BTB113U0",
     "Mike Scott":          "U4PLY5LMV",
@@ -98,6 +99,7 @@ NAME_TO_SLACK = {
     "Mark Mitchell":       "mark.mitchell",
     "Ella Wilks":          "Ella Wilks",
     "Hayden Woodward":     "Hayden",
+    "Emma Tavai":          "Emma Tavai",
     "Michael Morrah":      "Michael Morrah",
     "Sarah Bristow":       "Sarah Bristow",
     "Mike Scott":          "Mike Scott",
@@ -125,6 +127,7 @@ SHIFT_TIME_MEMBERS = [
     "Mark Mitchell",
     "Ella Wilks",
     "Hayden Woodward",
+    "Emma Tavai",
 ]
 
 # Known team member names (for away entry detection)
@@ -392,7 +395,7 @@ def build_message(monday):
         for e in studio_sorted:
             lines.append(format_event_line(e))
 
-    # ── Edits ──────────────────────────────────────────────────════════════════
+    # ── Edits ──────────────────────────────────────────────────────────────────
     edits = get_events(monday, TEAMUP_EDITING_ID)
     edits_sorted = sorted(edits, key=lambda e: e.get("start_dt", ""))
 
