@@ -75,6 +75,7 @@ _NAME_TO_SLACK_ID = {
     "Mark Mitchell":       "U4AJQH95Y",
     "Ella Wilks":          "U4BV744Q5",
     "Hayden Woodward":     "U03R4TRKTRR",
+    "Emma Tavai":          "U0BFVEELEP3",
     "Michael Morrah":      "U07B4DXQ95H",
     "Sarah Bristow":       "U07BTB113U0",
     "Mike Scott":          "U4PLY5LMV",
