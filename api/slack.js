@@ -26,6 +26,69 @@ const crypto = require('crypto');
 const GITHUB_REPO         = "Milla-Duke/visuals-scheduler";
 const TEAMUP_VISUALS_ID   = 11087400;
 const TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac";
+const NOTIFY_CHANNEL      = "visuals-team-chat-24";
+
+// Maps TeamUp 'who' field names to Slack User IDs for @mentions and DMs
+const NAME_TO_SLACK_ID = {
+  "Corey Fleming":       "U05MSEE6CLE",
+  "Cameron Pitney":      "UJCKXB7TN",
+  "Claudia Tarrant":     "U6WLV9NHH",
+  "Finn Little":         "U04Q8RUES87",
+  "Anna Heath":          "U09H5K1Q0Q7",
+  "Annaleise Shortland": "UME9TL2HW",
+  "Jason Dorday":        "U05VDUBTJ9W",
+  "Michael Craig":       "U480M042V",
+  "Kane Dickie":         "U03DA4YAFSN",
+  "Dean Purcell":        "U4B81DLTW",
+  "Alyse Wright":        "U057GUTGG3W",
+  "Sylvie Whinray":      "U0A3XK4466S",
+  "Tom Augustine":       "U954JL83S",
+  "Mark Mitchell":       "U4AJQH95Y",
+  "Ella Wilks":          "U4BV744Q5",
+  "Hayden Woodward":     "U03R4TRKTRR",
+  "Michael Morrah":      "U07B4DXQ95H",
+  "Sarah Bristow":       "U07BTB113U0",
+  "Mike Scott":          "U4PLY5LMV",
+  "Simon Plumb":         "U47T7L7S4",
+  "Darryn Fouhy":        "U08DYNFE4BT",
+  "Garth Bray":          "U07C7N4EEKS",
+  "Katie Oliver":        "U06Q0JLGKTN",
+};
+
+function slackMention(name) {
+  const trimmed = name.trim();
+  if (NAME_TO_SLACK_ID[trimmed]) return `<@${NAME_TO_SLACK_ID[trimmed]}>`;
+  // Case-insensitive fallback
+  const lower = trimmed.toLowerCase();
+  for (const [key, uid] of Object.entries(NAME_TO_SLACK_ID)) {
+    if (key.toLowerCase() === lower) return `<@${uid}>`;
+  }
+  return trimmed;
+}
+
+function slackUserId(name) {
+  const trimmed = name.trim();
+  if (NAME_TO_SLACK_ID[trimmed]) return NAME_TO_SLACK_ID[trimmed];
+  const lower = trimmed.toLowerCase();
+  for (const [key, uid] of Object.entries(NAME_TO_SLACK_ID)) {
+    if (key.toLowerCase() === lower) return uid;
+  }
+  return null;
+}
+
+function formatDt(dtString) {
+  if (!dtString) return '';
+  try {
+    const dt = new Date(dtString);
+    return dt.toLocaleString('en-NZ', {
+      timeZone: 'Pacific/Auckland',
+      weekday: 'long', day: 'numeric', month: 'long',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    }).toLowerCase();
+  } catch {
+    return dtString;
+  }
+}
 
 // Disable Vercel's automatic body parsing so we can read the raw body
 // (required for Slack signature verification)
@@ -161,7 +224,6 @@ async function redisSet(key, value) {
  *   - Send a DM to each @mentioned user in the original form
  */
 async function handleTeamupWebhook(body) {
-  // TeamUp payload structure: body.dispatch is an array of change objects
   const dispatch = body?.dispatch;
   if (!dispatch || !Array.isArray(dispatch) || dispatch.length === 0) {
     console.log('TeamUp webhook: no dispatch array in payload');
@@ -182,6 +244,7 @@ async function handleTeamupWebhook(body) {
     const title        = (event.title || 'your job').trim();
     const subcalendars = event.subcalendar_ids || [];
     const startDt      = event.start_dt || '';
+    const location     = (event.location || '').trim();
 
     console.log(`TeamUp webhook: trigger="${trigger}" event=${eventId} who="${who}" subcals=${JSON.stringify(subcalendars)}`);
 
@@ -197,25 +260,72 @@ async function handleTeamupWebhook(body) {
       continue;
     }
 
-    // Look up the original Slack booking from Redis
-    const redisKey = `booking:${eventId}`;
-    const booking  = await redisGet(redisKey);
+    const eventLink = `https://teamup.com/c/${TEAMUP_CALENDAR_KEY}/events/${eventId}`;
+    const dateClause = startDt ? ` on ${formatDt(startDt)}` : '';
 
-    if (!booking) {
-      console.log(`TeamUp webhook: no booking found in Redis for key ${redisKey}`);
+    // ── Check if this is a known Slack booking (came through the form) ────────
+    // If so, defer entirely to assignment_notifier.py which handles thread
+    // replies, DMs, and last_assigned tracking for those entries.
+    const bookingKey = `booking:${eventId}`;
+    const booking    = await redisGet(bookingKey);
+    if (booking) {
+      console.log(`TeamUp webhook: booking:${eventId} exists in Redis — deferring to assignment_notifier.py`);
       continue;
     }
 
-    // Don't send duplicate confirmations
-    if (booking.confirmed) {
-      console.log(`TeamUp webhook: booking ${eventId} already confirmed, skipping`);
+    // ── Native TeamUp entry — handle directly here ────────────────────────────
+    // Check Redis for last_assigned to avoid duplicate/unchanged notifications.
+    const nativeKey    = `native:${eventId}`;
+    const nativeRecord = await redisGet(nativeKey);
+    const lastAssigned = nativeRecord?.last_assigned || null;
+
+    if (who === lastAssigned) {
+      console.log(`TeamUp webhook: native ${eventId} — already notified for "${who}", skipping`);
       continue;
     }
 
-    // Notification is handled by assignment_notifier.py via cron-job.org.
-    // Logging here for debugging only — no Slack messages sent from Vercel
-    // to avoid duplicate notifications alongside the Python notifier.
-    console.log(`TeamUp webhook: assignment detected for event ${eventId}, who="${who}" — notifier will handle this`);
+    console.log(`TeamUp webhook: native ${eventId} — new assignment "${who}" (was "${lastAssigned || 'none'}")`);
+
+    // Parse the who field — may be a comma-separated list of names
+    const assignees = who.split(',').map(n => n.trim()).filter(Boolean);
+    const mentions  = assignees.map(slackMention).join(' ');
+
+    // Build the notification message
+    const isReassignment = !!lastAssigned;
+    const prevMentions   = isReassignment
+      ? lastAssigned.split(',').map(n => slackMention(n.trim())).join(' ')
+      : null;
+
+    let msg;
+    if (isReassignment) {
+      msg = `✅ ${mentions} has now been assigned to *<${eventLink}|${title}>*${dateClause}. This was previously ${prevMentions}.`;
+    } else {
+      msg = `✅ ${mentions} has been assigned to *<${eventLink}|${title}>*${dateClause}.`;
+    }
+
+    // Post to visuals-team-chat-24
+    await postSlackMessage(NOTIFY_CHANNEL, msg);
+    console.log(`TeamUp webhook: posted to #${NOTIFY_CHANNEL}`);
+
+    // Send a DM to each assigned person
+    for (const name of assignees) {
+      const uid = slackUserId(name);
+      if (uid) {
+        await postSlackMessage(uid, msg);
+        console.log(`TeamUp webhook: DM sent to ${name} (${uid})`);
+      } else {
+        console.log(`TeamUp webhook: no Slack ID found for "${name}" — DM skipped`);
+      }
+    }
+
+    // Write last_assigned back to Redis with a 90-day TTL
+    // (native entries don't have a known job date so we use a fixed TTL)
+    await redisSet(nativeKey, {
+      last_assigned: who,
+      title,
+      updated_at: new Date().toISOString(),
+    });
+    console.log(`TeamUp webhook: updated native:${eventId} last_assigned -> "${who}"`);
   }
 }
 
@@ -266,19 +376,8 @@ module.exports = async function handler(req, res) {
 
     if (command === '/visuals-update') {
       // Write a flag to Redis — cron-job.org picks it up within 2 minutes
-      // and triggers the appropriate workflow via /api/trigger.
+      // and triggers the Today's Jobs workflow via /api/trigger.
       // We can't call GitHub directly from Vercel due to network restrictions.
-      const arg = (params.get('text') || '').trim().toLowerCase();
-
-      if (arg === 'monday') {
-        await redisSet('pending_monday_draft', { requested_at: new Date().toISOString() });
-        res.json({
-          response_type: 'ephemeral',
-          text: "\u23f3 Generating Monday's draft \u2014 it'll appear in *#visuals-daily-schedule-message-drafts* within a couple of minutes.",
-        });
-        return;
-      }
-
       await redisSet('pending_today_jobs', { requested_at: new Date().toISOString() });
       res.json({
         response_type: 'ephemeral',
