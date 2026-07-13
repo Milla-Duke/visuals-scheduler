@@ -274,59 +274,23 @@ async function handleTeamupWebhook(body) {
       continue;
     }
 
-    // ── Native TeamUp entry — handle directly here ────────────────────────────
-    // Check Redis for last_assigned to avoid duplicate/unchanged notifications.
-    const nativeKey    = `native:${eventId}`;
-    const nativeRecord = await redisGet(nativeKey);
-    const lastAssigned = nativeRecord?.last_assigned || null;
-
-    if (who === lastAssigned) {
-      console.log(`TeamUp webhook: native ${eventId} — already notified for "${who}", skipping`);
-      continue;
-    }
-
-    console.log(`TeamUp webhook: native ${eventId} — new assignment "${who}" (was "${lastAssigned || 'none'}")`);
-
-    // Parse the who field — may be a comma-separated list of names
-    const assignees = who.split(',').map(n => n.trim()).filter(Boolean);
-    const mentions  = assignees.map(slackMention).join(' ');
-
-    // Build the notification message
-    const isReassignment = !!lastAssigned;
-    const prevMentions   = isReassignment
-      ? lastAssigned.split(',').map(n => slackMention(n.trim())).join(' ')
-      : null;
-
-    let msg;
-    if (isReassignment) {
-      msg = `✅ ${mentions} has now been assigned to *<${eventLink}|${title}>*${dateClause}. This was previously ${prevMentions}.`;
-    } else {
-      msg = `✅ ${mentions} has been assigned to *<${eventLink}|${title}>*${dateClause}.`;
-    }
-
-    // Post to visuals-team-chat-24
-    await postSlackMessage(NOTIFY_CHANNEL, msg);
-    console.log(`TeamUp webhook: posted to #${NOTIFY_CHANNEL}`);
-
-    // Send a DM to each assigned person
-    for (const name of assignees) {
-      const uid = slackUserId(name);
-      if (uid) {
-        await postSlackMessage(uid, msg);
-        console.log(`TeamUp webhook: DM sent to ${name} (${uid})`);
-      } else {
-        console.log(`TeamUp webhook: no Slack ID found for "${name}" — DM skipped`);
-      }
-    }
-
-    // Write last_assigned back to Redis with a 90-day TTL
-    // (native entries don't have a known job date so we use a fixed TTL)
-    await redisSet(nativeKey, {
-      last_assigned: who,
+    // ── Native TeamUp entry ───────────────────────────────────────────────────
+    // Write a pending_native flag and let assignment_notifier.py handle the
+    // Slack calls. This avoids multiple outbound connections from Vercel which
+    // causes ETIMEDOUT errors on the Hobby plan.
+    const pendingKey = `pending_native:${eventId}`;
+    const flagged = await redisSet(pendingKey, {
+      event_id:   eventId,
+      who,
       title,
-      updated_at: new Date().toISOString(),
+      start_dt:   startDt,
+      flagged_at: new Date().toISOString(),
     });
-    console.log(`TeamUp webhook: updated native:${eventId} last_assigned -> "${who}"`);
+    if (flagged) {
+      console.log(`TeamUp webhook: wrote pending_native:${eventId} for "${who}" — notifier will handle`);
+    } else {
+      console.log(`TeamUp webhook: WARNING — could not write pending_native:${eventId} to Redis`);
+    }
   }
 }
 
