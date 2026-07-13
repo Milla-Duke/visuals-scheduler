@@ -116,6 +116,25 @@ def get_teamup_event(event_id):
     )
     return resp.json().get("event")
 
+def get_teamup_events_range(start_date, end_date, subcalendar_id):
+    """Fetch all events from a subcalendar between two dates."""
+    headers = {"Teamup-Token": TEAMUP_API_KEY}
+    params = {
+        "startDate": start_date.strftime("%Y-%m-%d"),
+        "endDate":   end_date.strftime("%Y-%m-%d"),
+        "subcalendarId[]": subcalendar_id,
+    }
+    try:
+        resp = requests.get(
+            f"{TEAMUP_BASE_URL}/events",
+            headers=headers, params=params, timeout=15
+        )
+        resp.raise_for_status()
+        return resp.json().get("events", [])
+    except Exception as e:
+        print(f"  WARNING: Could not fetch TeamUp events: {e}")
+        return []
+
 def post_slack_message(channel, text, thread_ts=None):
     headers = {
         "Authorization": f"Bearer {SLACK_BOT_TOKEN}",
@@ -294,6 +313,102 @@ def main():
         print(f"\n\u2713 Sent {confirmed_count} notification(s).")
     else:
         print("\nNo new assignments to notify.")
+
+    # ── Native TeamUp entries ─────────────────────────────────────────────────
+    # Poll TeamUp directly for any Visuals events with a 'who' field set that
+    # didn't come through the Slack booking form. Covers today + 14 days ahead.
+    # Vercel Hobby blocks all outbound connections so we handle this here in
+    # GitHub Actions where there are no network restrictions.
+    print("\nChecking for native TeamUp assignments...")
+
+    TEAMUP_VISUALS_ID = 11087400
+    now_utc    = datetime.now(timezone.utc)
+    start_date = now_utc.date()
+    end_date   = (now_utc + timedelta(days=14)).date()
+
+    events = get_teamup_events_range(start_date, end_date, TEAMUP_VISUALS_ID)
+    print(f"  Found {len(events)} Visuals event(s) in the next 14 days")
+
+    native_count = 0
+
+    for event in events:
+        event_id = str(event.get("id", ""))
+        who      = (event.get("who") or "").strip()
+        title    = (event.get("title") or "your job").strip()
+        start_dt = event.get("start_dt", "")
+
+        if not who:
+            continue
+
+        # Skip if this came through the Slack booking form — already handled
+        booking = redis_get(f"booking:{event_id}")
+        if booking:
+            continue
+
+        # Check last_assigned for this native entry
+        native_key    = f"native:{event_id}"
+        native_record = redis_get(native_key)
+        last_assigned = native_record.get("last_assigned") if isinstance(native_record, dict) else None
+
+        if who == last_assigned:
+            continue  # Already notified for this assignment
+
+        print(f"\n  Native event {event_id} ({title}) — '{who}' (was '{last_assigned or 'none'}')")
+
+        # Build message
+        event_link  = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
+        date_clause = f" on {format_dt(start_dt)}" if start_dt else ""
+        assignees   = [n.strip() for n in who.split(",") if n.strip()]
+        mentions    = " ".join(slack_mention(n) for n in assignees)
+
+        if last_assigned:
+            prev_mentions = " ".join(
+                slack_mention(n.strip()) for n in last_assigned.split(",") if n.strip()
+            )
+            msg = (
+                f"\u2705 {mentions} has now been assigned to "
+                f"<{event_link}|{title}>{date_clause}. "
+                f"This was previously {prev_mentions}."
+            )
+        else:
+            msg = (
+                f"\u2705 {mentions} has been assigned to "
+                f"<{event_link}|{title}>{date_clause}."
+            )
+
+        # Post to visuals-team-chat-24
+        ok = post_slack_message("visuals-team-chat-24", msg)
+        if ok:
+            print(f"  \u2713 Posted to #visuals-team-chat-24")
+
+        # DM each assigned person
+        for name in assignees:
+            uid = NAME_TO_SLACK_ID.get(name)
+            if not uid:
+                for key, val in NAME_TO_SLACK_ID.items():
+                    if key.lower() == name.lower():
+                        uid = val
+                        break
+            if uid:
+                ok = post_slack_message(uid, msg)
+                if ok:
+                    print(f"  \u2713 DM sent to {name}")
+            else:
+                print(f"  No Slack ID for '{name}' — DM skipped")
+
+        # Write last_assigned back to Redis with 90-day TTL
+        redis_set(native_key, {
+            "last_assigned": who,
+            "title":         title,
+            "updated_at":    now_utc.isoformat(),
+        })
+        print(f"  \u2713 Updated native:{event_id} last_assigned -> '{who}'")
+        native_count += 1
+
+    if native_count:
+        print(f"\n\u2713 Sent {native_count} native assignment notification(s).")
+    else:
+        print("  No new native assignments found.")
 
 if __name__ == "__main__":
     main()
