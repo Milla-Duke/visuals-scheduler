@@ -25,7 +25,7 @@ const crypto = require('crypto');
 
 const GITHUB_REPO         = "Milla-Duke/visuals-scheduler";
 const TEAMUP_VISUALS_ID   = 11087400;
-const TEAMUP_CALENDAR_KEY = "q1rqrs";
+const TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac";
 const NOTIFY_CHANNEL      = "visuals-team-chat-24";
 
 // Maps TeamUp 'who' field names to Slack User IDs for @mentions and DMs
