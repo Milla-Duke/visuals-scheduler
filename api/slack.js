@@ -122,7 +122,9 @@ function verifySlackSignature(headers, rawBody, signingSecret) {
   return computed === signature;
 }
 
-async function triggerWorkflow(eventType) {
+async function triggerWorkflow(eventType, clientPayload = null) {
+  const body = { event_type: eventType };
+  if (clientPayload) body.client_payload = clientPayload;
   const resp = await fetch(
     `https://api.github.com/repos/${GITHUB_REPO}/dispatches`,
     {
@@ -133,12 +135,14 @@ async function triggerWorkflow(eventType) {
         'Content-Type': 'application/json',
         'User-Agent': 'visuals-scheduler-vercel',
       },
-      body: JSON.stringify({ event_type: eventType }),
+      body: JSON.stringify(body),
     }
   );
   if (!resp.ok) {
     console.error(`GitHub dispatch failed (${eventType}): ${resp.status} ${await resp.text()}`);
+    return false;
   }
+  return true;
 }
 
 async function postSlackMessage(channel, text, threadTs = null) {
@@ -275,21 +279,20 @@ async function handleTeamupWebhook(body) {
     }
 
     // ── Native TeamUp entry ───────────────────────────────────────────────────
-    // Write a pending_native flag and let assignment_notifier.py handle the
-    // Slack calls. This avoids multiple outbound connections from Vercel which
-    // causes ETIMEDOUT errors on the Hobby plan.
-    const pendingKey = `pending_native:${eventId}`;
-    const flagged = await redisSet(pendingKey, {
-      event_id:   eventId,
+    // Dispatch directly to GitHub Actions, passing the event details as
+    // client_payload. The native-notifier workflow handles last_assigned
+    // tracking and Slack notifications from GitHub Actions where there
+    // are no network restrictions.
+    const ok = await triggerWorkflow('native-assignment-trigger', {
+      event_id: eventId,
       who,
       title,
-      start_dt:   startDt,
-      flagged_at: new Date().toISOString(),
+      start_dt: startDt,
     });
-    if (flagged) {
-      console.log(`TeamUp webhook: wrote pending_native:${eventId} for "${who}" — notifier will handle`);
+    if (ok) {
+      console.log(`TeamUp webhook: dispatched native-assignment-trigger for event ${eventId} who="${who}"`);
     } else {
-      console.log(`TeamUp webhook: WARNING — could not write pending_native:${eventId} to Redis`);
+      console.log(`TeamUp webhook: WARNING — failed to dispatch for event ${eventId}`);
     }
   }
 }
