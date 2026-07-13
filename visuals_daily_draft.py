@@ -657,12 +657,15 @@ def post_to_slack(message, channel):
 def main():
     # ── TIME GUARD ─────────────────────────────────────────────────────────────
     # Two cron entries in daily-draft.yml cover NZST and NZDT, but both fire
-    # every day. We only want to post during the 5pm hour NZ time — the other
+    # every day. We only want to post during the 6pm hour NZ time — the other
     # trigger lands outside that window and exits silently.
+    # Manual runs (workflow_dispatch) and slash command triggers
+    # (repository_dispatch) always post immediately, bypassing the time check.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-    if now_nz.hour != 18:
-        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 5pm posting window.")
+    is_scheduled = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
+    if is_scheduled and now_nz.hour != 18:
+        print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 6pm posting window.")
         sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
 
