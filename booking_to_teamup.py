@@ -49,7 +49,7 @@ SLACK_BOT_TOKEN        = _config.get("slack_bot_token") or os.environ.get("SLACK
 SLACK_BOOKINGS_CHANNEL = "visual-crew-bookings"
 
 TEAMUP_API_KEY         = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY", "")
-TEAMUP_CALENDAR_KEY    = "q1rqrs"
+TEAMUP_CALENDAR_KEY    = "ksi7k2xr9brt5tn2ac"
 TEAMUP_VISUALS_ID      = 11087400
 TEAMUP_BASE_URL        = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 DEFAULT_DURATION_HOURS = 2
@@ -627,7 +627,7 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
 
     if event:
         event_id   = event.get("id", "")
-        event_link = f"https://teamup.com/c/q1rqrs/events/{event_id}"
+        event_link = f"https://teamup.com/c/ksi7k2xr9brt5tn2ac/events/{event_id}"
         print(f"  TeamUp entry created: {event_link}")
 
         # Store booking in Redis so assignment_notifier.py can send
