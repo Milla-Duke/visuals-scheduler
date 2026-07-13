@@ -1,0 +1,36 @@
+name: Native Assignment Notifier
+
+on:
+  # Fired by api/slack.js when TeamUp webhook detects an assignment
+  # on a natively-created calendar entry (not from the booking form).
+  repository_dispatch:
+    types: [native-assignment-trigger]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Send assignment notification
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          EVENT_ID: ${{ github.event.client_payload.event_id }}
+          WHO: ${{ github.event.client_payload.who }}
+          TITLE: ${{ github.event.client_payload.title }}
+          START_DT: ${{ github.event.client_payload.start_dt }}
+        run: python native_notifier.py
