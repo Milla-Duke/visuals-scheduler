@@ -295,5 +295,83 @@ def main():
     else:
         print("\nNo new assignments to notify.")
 
+    # ── Native TeamUp entries ─────────────────────────────────────────────────
+    # The TeamUp webhook writes pending_native:{event_id} flags when someone
+    # is assigned to a natively-created entry. We handle them here to avoid
+    # Vercel Hobby plan network timeouts on outbound Slack/Redis calls.
+    native_keys = redis_keys("pending_native:*")
+    print(f"\nFound {len(native_keys)} pending native assignment(s)")
+
+    native_count = 0
+
+    for key in native_keys:
+        pending = redis_get(key)
+        if not pending:
+            continue
+
+        event_id = pending.get("event_id", key.replace("pending_native:", ""))
+        who      = (pending.get("who") or "").strip()
+        title    = pending.get("title", "your job")
+        start_dt = pending.get("start_dt", "")
+
+        if not who:
+            print(f"  pending_native:{event_id} has no 'who' — removing")
+            redis_delete(key)
+            continue
+
+        print(f"\n  Native event {event_id} ({title}) — assigned to: {who}")
+
+        # Check last_assigned to avoid re-notifying for the same person
+        native_record = redis_get(f"native:{event_id}")
+        last_assigned = native_record.get("last_assigned") if isinstance(native_record, dict) else None
+
+        if who == last_assigned:
+            print(f"  Already notified for '{who}' — removing pending flag")
+            redis_delete(key)
+            continue
+
+        # Build message
+        event_link   = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
+        date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
+        assignees    = [n.strip() for n in who.split(",") if n.strip()]
+        mentions     = " ".join(slack_mention(n) for n in assignees)
+
+        if last_assigned:
+            prev_mentions = " ".join(slack_mention(n.strip()) for n in last_assigned.split(",") if n.strip())
+            msg = f"\u2705 {mentions} has now been assigned to <{event_link}|{title}>{date_clause}. This was previously {prev_mentions}."
+        else:
+            msg = f"\u2705 {mentions} has been assigned to <{event_link}|{title}>{date_clause}."
+
+        # Post to visuals-team-chat-24
+        ok = post_slack_message("visuals-team-chat-24", msg)
+        if ok:
+            print(f"  \u2713 Posted to #visuals-team-chat-24")
+
+        # DM each assigned person
+        for name in assignees:
+            uid = NAME_TO_SLACK_ID.get(name)
+            if uid:
+                ok = post_slack_message(uid, msg)
+                if ok:
+                    print(f"  \u2713 DM sent to {name}")
+            else:
+                print(f"  No Slack ID for '{name}' — DM skipped")
+
+        # Update native:{event_id} with last_assigned and refresh TTL
+        redis_set(f"native:{event_id}", {
+            "last_assigned": who,
+            "title":         title,
+            "updated_at":    datetime.now(timezone.utc).isoformat(),
+        }, ex_seconds=7776000)
+        print(f"  \u2713 Updated native:{event_id} last_assigned -> '{who}'")
+
+        # Remove the pending flag
+        redis_delete(key)
+        print(f"  \u2713 Cleared pending_native:{event_id}")
+        native_count += 1
+
+    if native_count:
+        print(f"\n\u2713 Sent {native_count} native assignment notification(s).")
+
 if __name__ == "__main__":
     main()
