@@ -34,7 +34,7 @@ except json.JSONDecodeError as _e:
 # CONFIGURATION — edit these if anything changes
 # ═══════════════════════════════════════════════════════════════════════════════
 TEAMUP_API_KEY = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY", "")
-TEAMUP_CALENDAR_KEY = "q1rqrs"
+TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
 TEAMUP_STUDIO_ID = 2130584232  # Studio subcalendar (hardcoded — not name-looked-up)
