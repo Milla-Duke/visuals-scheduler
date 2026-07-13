@@ -45,7 +45,7 @@ except (FileNotFoundError, json.JSONDecodeError):
 SLACK_BOT_TOKEN   = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 TEAMUP_API_KEY    = _config.get("teamup_api_key")  or os.environ.get("TEAMUP_API_KEY", "")
 
-TEAMUP_CALENDAR_KEY       = "ksi7k2xr9brt5tn2ac"
+TEAMUP_CALENDAR_KEY       = "q1rqrs"
 TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_STUDIO_ID          = 11087384
 TEAMUP_EDITING_ID         = 12991604
