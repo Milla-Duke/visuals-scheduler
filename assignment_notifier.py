@@ -13,6 +13,7 @@ Requirements:
 """
 
 import os
+import re
 import sys
 import json
 import requests
@@ -23,7 +24,7 @@ TEAMUP_API_KEY           = os.environ.get("TEAMUP_API_KEY", "")
 UPSTASH_REDIS_REST_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 UPSTASH_REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
-TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
+TEAMUP_CALENDAR_KEY = "q1rqrs"
 TEAMUP_BASE_URL     = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 
 NAME_TO_SLACK_ID = {
@@ -36,6 +37,7 @@ NAME_TO_SLACK_ID = {
     "Jason Dorday":        "U05VDUBTJ9W",
     "Michael Craig":       "U480M042V",
     "Kane Dickie":         "U03DA4YAFSN",
+    "Kane":                "U03DA4YAFSN",
     "Dean Purcell":        "U4B81DLTW",
     "Alyse Wright":        "U057GUTGG3W",
     "Sylvie Whinray":      "U0A3XK4466S",
@@ -358,12 +360,12 @@ def main():
         # Build message
         event_link  = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
         date_clause = f" on {format_dt(start_dt)}" if start_dt else ""
-        assignees   = [n.strip() for n in who.split(",") if n.strip()]
+        assignees   = [n.strip() for n in re.split(r',|&', who) if n.strip()]
         mentions    = " ".join(slack_mention(n) for n in assignees)
 
         if last_assigned:
             prev_mentions = " ".join(
-                slack_mention(n.strip()) for n in last_assigned.split(",") if n.strip()
+                slack_mention(n.strip()) for n in re.split(r',|&', last_assigned) if n.strip()
             )
             msg = (
                 f"\u2705 {mentions} has now been assigned to "
