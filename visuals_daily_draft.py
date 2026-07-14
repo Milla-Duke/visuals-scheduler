@@ -37,7 +37,7 @@ TEAMUP_API_KEY = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY
 TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
-TEAMUP_STUDIO_ID = 11087384  # Studio subcalendar (hardcoded — not name-looked-up)
+TEAMUP_STUDIO_ID = 2130584232  # Studio subcalendar (hardcoded — not name-looked-up)
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
@@ -663,8 +663,11 @@ def main():
     # (repository_dispatch) always post immediately, bypassing the time check.
     nz = pytz.timezone("Pacific/Auckland")
     now_nz = datetime.now(nz)
-    is_scheduled = os.environ.get("GITHUB_EVENT_NAME") == "schedule"
-    if is_scheduled and now_nz.hour != 18:
+    # For scheduled runs: only post during the 6pm NZ hour.
+    # workflow_dispatch and repository_dispatch runs bypass this via the
+    # GITHUB_EVENT_NAME env var passed explicitly from the workflow.
+    event_name = os.environ.get("GITHUB_EVENT_NAME", "workflow_dispatch")
+    if event_name == "schedule" and now_nz.hour != 18:
         print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 6pm posting window.")
         sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
