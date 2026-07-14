@@ -39,4 +39,5 @@ jobs:
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python visuals_daily_draft.py
