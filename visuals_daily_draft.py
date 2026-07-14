@@ -37,7 +37,7 @@ TEAMUP_API_KEY = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY
 TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_SUBCALENDAR_NAME = "NZME Departments > Visuals"   # Jobs subcalendar
 TEAMUP_EDITING_SUBCALENDAR_NAME = "NZME Departments > Visuals > Editing"  # Edits subcalendar
-TEAMUP_STUDIO_ID = 2130584232  # Studio subcalendar (hardcoded — not name-looked-up)
+TEAMUP_STUDIO_ID = 11087384  # Studio subcalendar (hardcoded — not name-looked-up)
 # Slack token — reads from config.json, falls back to environment variable
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
@@ -403,7 +403,7 @@ def format_event_line(event, skip_time=False):
     # Handles multiple names separated by commas e.g. "Michael Craig, Anna Heath"
     mention = ""
     if who:
-        names = [n.strip() for n in who.split(",") if n.strip()]
+        names = [n.strip() for n in re.split(r',|&', who) if n.strip()]
         mention = " ".join(slack_mention(n) for n in names) + " "
     # TeamUp event link
     if event_id:
