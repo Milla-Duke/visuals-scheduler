@@ -289,7 +289,7 @@ def format_event_line(event):
 
     mention = ""
     if who:
-        names = [n.strip() for n in who.split(",") if n.strip()]
+        names = [n.strip() for n in re.split(r',|&', who) if n.strip()]
         mention = " ".join(slack_mention(n) for n in names) + " "
 
     if event_id:
