@@ -270,7 +270,7 @@ def main():
 
         print(f"  Photographer assigned: {who} (previously: {last_assigned or 'none'})")
 
-        event_link   = f"https://teamup.com/c/ksi7k2xr9brt5tn2ac/events/{event_id}"
+        event_link   = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
         who_mention  = slack_mention(who)
         mentions_str = " ".join(f"<@{uid}>" for uid in mention_ids) if mention_ids else ""
