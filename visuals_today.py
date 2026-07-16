@@ -38,6 +38,7 @@ SLACK_BOT_TOKEN   = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_
 TEAMUP_API_KEY    = _config.get("teamup_api_key")  or os.environ.get("TEAMUP_API_KEY", "")
 
 TEAMUP_CALENDAR_KEY       = "ksi7k2xr9brt5tn2ac"
+TEAMUP_LINK_KEY           = "q1rqrs"  # shared calendar key for event links
 TEAMUP_VISUALS_ID         = 11087400
 TEAMUP_STUDIO_ID          = 11087384
 TEAMUP_EDITING_ID         = 12991604
@@ -293,7 +294,7 @@ def format_event_line(event):
         mention = " ".join(slack_mention(n) for n in names) + " "
 
     if event_id:
-        link = f"https://teamup.com/c/{TEAMUP_CALENDAR_KEY}/events/{event_id}"
+        link = f"https://teamup.com/c/{TEAMUP_LINK_KEY}/events/{event_id}"
         job_text = f"<{link}|{title}>"
     else:
         job_text = title
