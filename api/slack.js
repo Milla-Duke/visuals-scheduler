@@ -26,6 +26,7 @@ const crypto = require('crypto');
 const GITHUB_REPO         = "Milla-Duke/visuals-scheduler";
 const TEAMUP_VISUALS_ID   = 11087400;
 const TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac";
+const TEAMUP_LINK_KEY     = "q1rqrs";  // shared calendar key for building event links
 const NOTIFY_CHANNEL      = "visuals-team-chat-24";
 
 // Maps TeamUp 'who' field names to Slack User IDs for @mentions and DMs
@@ -265,7 +266,7 @@ async function handleTeamupWebhook(body) {
       continue;
     }
 
-    const eventLink = `https://teamup.com/c/${TEAMUP_CALENDAR_KEY}/events/${eventId}`;
+    const eventLink = `https://teamup.com/c/${TEAMUP_LINK_KEY}/events/${eventId}`;
     const dateClause = startDt ? ` on ${formatDt(startDt)}` : '';
 
     // ── Check if this is a known Slack booking (came through the form) ────────
