@@ -316,17 +316,26 @@ def extract_field(text, field_name, fields_list=None):
 
     next_fields = "|".join(re.escape(f) for f in fields_list if f != field_name)
 
-    # Try new format first: plain label (optionally bold via asterisks), value on next line
+    # Try new format first: plain label (optionally bold via asterisks), value on next line.
+    # The value must not start with a bold field label (*...*) — that would mean the field
+    # is empty and we've grabbed the next field's label instead.
     pattern_new = rf"(?:^|\n)\*?{re.escape(field_name)}\??\*?\s*\n(.*?)(?=\n\*?(?:{next_fields})\??\*?\s*\n|$)"
     match = re.search(pattern_new, text, re.DOTALL | re.IGNORECASE)
     if match:
-        return _clean(match.group(1).strip())
+        value = match.group(1).strip()
+        # If the value looks like a field label, the field was empty — return ""
+        if re.match(r'^\*[^*]+\*', value):
+            return ""
+        return _clean(value)
 
     # Fall back to old bold format: *Field name* then value
     pattern_old = rf"\*{re.escape(field_name)}\??\*\s*\n(.*?)(?=\*(?:{next_fields})\??\*|$)"
     match = re.search(pattern_old, text, re.DOTALL | re.IGNORECASE)
     if match:
-        return _clean(match.group(1).strip())
+        value = match.group(1).strip()
+        if re.match(r'^\*[^*]+\*', value):
+            return ""
+        return _clean(value)
 
     return ""
 
