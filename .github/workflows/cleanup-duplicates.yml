@@ -1,0 +1,25 @@
+name: Cleanup Duplicate Entries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run cleanup
+        env:
+          TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
+        run: python cleanup_duplicates.py
