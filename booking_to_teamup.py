@@ -162,6 +162,38 @@ def save_processed(processed):
     with open(_PROCESSED_PATH, "w") as f:
         json.dump(data, f, indent=2)
 
+def redis_is_processed(slack_ts):
+    """Check if a Slack message timestamp has already been processed via Redis."""
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        return False
+    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+    try:
+        resp = requests.get(
+            f"{UPSTASH_REDIS_REST_URL}/get/processed:{slack_ts}",
+            headers=headers, timeout=10
+        )
+        return resp.json().get("result") is not None
+    except Exception:
+        return False
+
+def redis_mark_processed(slack_ts):
+    """Mark a Slack message timestamp as processed in Redis (90-day TTL)."""
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        return
+    headers = {
+        "Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    try:
+        requests.post(
+            f"{UPSTASH_REDIS_REST_URL}/pipeline",
+            headers=headers,
+            json=[["SET", f"processed:{slack_ts}", "1", "EX", 60*60*24*90]],
+            timeout=10,
+        )
+    except Exception:
+        pass
+
 def _store_booking(event_id, booking_data):
     """
     Store booking metadata in processed_bookings.json so the assignment
@@ -584,7 +616,10 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_
 def process_message(msg, channel_id, processed):
     ts   = msg.get("ts", "")
     text = msg.get("text", "")
-    if ts in processed:
+
+    # Check Redis first (reliable, persistent across runs)
+    # Fall back to the local processed set (file-based, for same-run dedup)
+    if redis_is_processed(ts) or ts in processed:
         return False
     if is_booking_form(text):
         print(f"\n  New booking form found (ts: {ts})")
@@ -677,6 +712,7 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
         )
 
     processed.add(ts)
+    redis_mark_processed(ts)  # Persist to Redis so future runs don't reprocess
     return True
 
 
