@@ -80,18 +80,20 @@ def main():
         print(f"\n'{title}': {len(group)} entries found")
         print(f"  Looking for keep ID: {keep_id}")
         print(f"  First 5 IDs found: {[e.get('id') for e in group[:5]]}")
-        found_ids = [e.get('id') for e in group]
+        found_ids = [int(e.get('id')) for e in group]
+        print(f"  First 5 IDs found: {found_ids[:5]}")
         if keep_id not in found_ids:
-            print(f"  WARNING: Keep ID {keep_id} not found — will skip deletion for safety")
+            print(f"  Keep ID not found — printing all IDs for this group:")
+            print(f"  {found_ids}")
             continue
 
-        duplicates = [e for e in group if e.get("id") != keep_id]
-        keeper = next((e for e in group if e.get("id") == keep_id), None)
+        duplicates = [e for e in group if int(e.get("id")) != keep_id]
+        keeper = next((e for e in group if int(e.get("id")) == keep_id), None)
         print(f"  Keeping:  ID {keep_id} — '{keeper.get('title', '')}' ({keeper.get('start_dt', '')})")
         print(f"  Deleting: {len(duplicates)} duplicate(s)")
 
         for event in duplicates:
-            event_id = event.get("id")
+            event_id = int(event.get("id"))
             ok = delete_event(event_id)
             if ok:
                 print(f"  ✓ Deleted {event_id} — '{event.get('title', '')}' ({event.get('start_dt', '')})")
