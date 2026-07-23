@@ -22,7 +22,7 @@ except (FileNotFoundError, json.JSONDecodeError):
     _config = {}
 
 TEAMUP_API_KEY      = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY", "")
-TEAMUP_CALENDAR_KEY = "q1rqrs"
+TEAMUP_CALENDAR_KEY = "ksi7k2xr9brt5tn2ac"
 TEAMUP_VISUALS_ID   = 11087400
 TEAMUP_BASE_URL     = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 
@@ -38,7 +38,6 @@ def get_events(start_date, end_date):
     params = {
         "startDate": start_date,
         "endDate":   end_date,
-        "subcalendarId[]": TEAMUP_VISUALS_ID,
     }
     resp = requests.get(f"{TEAMUP_BASE_URL}/events", headers=headers, params=params, timeout=15)
     resp.raise_for_status()
