@@ -63,33 +63,41 @@ def main():
     events = get_events(start, end)
     print(f"Found {len(events)} total events")
 
-    # Find all events matching our duplicate titles and delete them all.
-    # The correct keeper entries were moved to q1rqrs by Ella and are safe —
-    # everything remaining under ksi7k2xr9brt5tn2ac is a duplicate to delete.
-    to_delete = []
+    # Find all events matching our duplicate titles
+    groups = {}
     for event in events:
         title = (event.get("title") or "").strip()
         for dup_title in KEEP_EVENT_IDS:
             if dup_title.lower() in title.lower():
-                to_delete.append(event)
+                if dup_title not in groups:
+                    groups[dup_title] = []
+                groups[dup_title].append(event)
                 break
 
-    print(f"\nFound {len(to_delete)} entries to delete across all three titles")
-    print("\nFirst 10 matching entries found:")
-    for event in to_delete[:10]:
-        print(f"  ID {event.get('id')} — '{event.get('title', '')}' ({event.get('start_dt', '')})")
-
     total_deleted = 0
-    for event in to_delete:
-        event_id = event.get("id")
-        title    = event.get("title", "")
-        start_dt = event.get("start_dt", "")
-        ok = delete_event(event_id)
-        if ok:
-            print(f"  ✓ Deleted {event_id} — '{title}' ({start_dt})")
-            total_deleted += 1
-        else:
-            print(f"  ✗ Failed to delete {event_id} — '{title}'")
+    for title, group in groups.items():
+        keep_id = KEEP_EVENT_IDS[title]
+        print(f"\n'{title}': {len(group)} entries found")
+        print(f"  Looking for keep ID: {keep_id}")
+        print(f"  First 5 IDs found: {[e.get('id') for e in group[:5]]}")
+        found_ids = [e.get('id') for e in group]
+        if keep_id not in found_ids:
+            print(f"  WARNING: Keep ID {keep_id} not found — will skip deletion for safety")
+            continue
+
+        duplicates = [e for e in group if e.get("id") != keep_id]
+        keeper = next((e for e in group if e.get("id") == keep_id), None)
+        print(f"  Keeping:  ID {keep_id} — '{keeper.get('title', '')}' ({keeper.get('start_dt', '')})")
+        print(f"  Deleting: {len(duplicates)} duplicate(s)")
+
+        for event in duplicates:
+            event_id = event.get("id")
+            ok = delete_event(event_id)
+            if ok:
+                print(f"  ✓ Deleted {event_id} — '{event.get('title', '')}' ({event.get('start_dt', '')})")
+                total_deleted += 1
+            else:
+                print(f"  ✗ Failed to delete {event_id}")
 
     print(f"\n✓ Done — deleted {total_deleted} duplicate entry/entries.")
 
