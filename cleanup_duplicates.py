@@ -56,46 +56,40 @@ def main():
         print("ERROR: No TEAMUP_API_KEY found")
         return
 
-    print("Fetching Visuals events for the last 7 days + next 90 days...")
+    print("Fetching all events for the last 7 days + next 90 days...")
     start = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
     end   = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
 
     events = get_events(start, end)
     print(f"Found {len(events)} total events")
 
-    # Group events by their matching title
-    groups = {}
+    # Find all events matching our duplicate titles and delete them all.
+    # The correct keeper entries were moved to q1rqrs by Ella and are safe —
+    # everything remaining under ksi7k2xr9brt5tn2ac is a duplicate to delete.
+    to_delete = []
     for event in events:
         title = (event.get("title") or "").strip()
         for dup_title in KEEP_EVENT_IDS:
             if dup_title.lower() in title.lower():
-                if dup_title not in groups:
-                    groups[dup_title] = []
-                groups[dup_title].append(event)
+                to_delete.append(event)
                 break
 
+    print(f"\nFound {len(to_delete)} entries to delete across all three titles")
+    print("\nFirst 10 matching entries found:")
+    for event in to_delete[:10]:
+        print(f"  ID {event.get('id')} — '{event.get('title', '')}' ({event.get('start_dt', '')})")
+
     total_deleted = 0
-    for title, group in groups.items():
-        keep_id = KEEP_EVENT_IDS[title]
-        duplicates = [e for e in group if e.get("id") != keep_id]
-        keeper    = next((e for e in group if e.get("id") == keep_id), None)
-
-        print(f"\n'{title}': {len(group)} entries found")
-        if keeper:
-            print(f"  Keeping:  ID {keep_id} — '{keeper.get('title', '')}' ({keeper.get('start_dt', '')})")
+    for event in to_delete:
+        event_id = event.get("id")
+        title    = event.get("title", "")
+        start_dt = event.get("start_dt", "")
+        ok = delete_event(event_id)
+        if ok:
+            print(f"  ✓ Deleted {event_id} — '{title}' ({start_dt})")
+            total_deleted += 1
         else:
-            print(f"  WARNING: Keep ID {keep_id} not found in results — skipping this group")
-            continue
-
-        print(f"  Deleting: {len(duplicates)} duplicate(s)")
-        for event in duplicates:
-            event_id = event.get("id")
-            ok = delete_event(event_id)
-            if ok:
-                print(f"  ✓ Deleted {event_id} — '{event.get('title', '')}' ({event.get('start_dt', '')})")
-                total_deleted += 1
-            else:
-                print(f"  ✗ Failed to delete {event_id}")
+            print(f"  ✗ Failed to delete {event_id} — '{title}'")
 
     print(f"\n✓ Done — deleted {total_deleted} duplicate entry/entries.")
 
