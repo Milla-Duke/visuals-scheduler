@@ -113,6 +113,18 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // Check for pending Sunday draft request
+  const pendingSundayDraft = await redisGet('pending_sunday_draft');
+  if (pendingSundayDraft) {
+    foundAny = true;
+    console.log(`Found pending_sunday_draft flag (requested at ${pendingSundayDraft.requested_at})`);
+    const ok = await triggerWorkflow('sunday-draft-trigger');
+    if (ok) {
+      await redisDelete('pending_sunday_draft');
+      console.log('Triggered sunday-draft-trigger and cleared flag');
+    }
+  }
+
   if (!foundAny) {
     console.log('No pending jobs flags found');
   }

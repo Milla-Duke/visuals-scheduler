@@ -1,0 +1,31 @@
+name: Sunday Draft
+
+on:
+  workflow_dispatch:
+
+  repository_dispatch:
+    types: [sunday-draft-trigger]
+
+jobs:
+  post-sunday-draft:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests pytz
+
+      - name: Post Sunday's draft to Slack
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
+        run: python visuals_sunday_draft.py
