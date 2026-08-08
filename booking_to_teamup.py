@@ -517,13 +517,12 @@ def form_to_html(raw_text):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 LIVESTREAM_FIELDS = [
-    "Live stream title",
-    "Description",
+    "Live stream title and description",
     "Date and time of live stream",
     "Location",
     "Link to live stream (if externally sourced)",
     "Please provide any/all other info on the live stream",
-    "Who is reporter and will they be attending",
+    "Who is the reporter and will they be attending?",
     "Live stream requester",
 ]
 
@@ -531,7 +530,7 @@ def is_livestream_form(text):
     if not text:
         return False
     t = text.lower()
-    return "live stream title:" in t or "live stream request form" in t
+    return "live stream title" in t and "live stream requester" in t
 
 def extract_livestream_field(text, field_name):
     next_fields = "|".join(re.escape(f) for f in LIVESTREAM_FIELDS if f != field_name)
@@ -645,7 +644,7 @@ def process_message(msg, channel_id, processed):
         print(f"\n  New live stream form found (ts: {ts})")
         return _process_form(
             ts, text, channel_id, processed,
-            title_fn=lambda t: "LIVE: " + (extract_livestream_field(t, "Live stream title") or "Live stream"),
+            title_fn=lambda t: "LIVE: " + (extract_livestream_field(t, "Live stream title and description") or "Live stream"),
             date_fn=lambda t: extract_livestream_field(t, "Date and time of live stream"),
             location_fn=lambda t: extract_livestream_field(t, "Location"),
             notes_fn=livestream_to_html,
