@@ -518,11 +518,18 @@ def form_to_html(raw_text):
 
 LIVESTREAM_FIELDS = [
     "Live stream title and description",
+    "Live stream title",
     "Date and time of live stream",
-    "Location",
+    "Is a videographer required to shoot this or will a link to the stream be provided?",
+    "Link to livestream if provided from another source",
     "Link to live stream (if externally sourced)",
-    "Please provide any/all other info on the live stream",
+    "Location",
+    "Will a reporter be attending?",
+    "If yes, who is the reporter?",
+    "Will the reporter be attending?",
     "Who is the reporter and will they be attending?",
+    "Please provide any/all other info on the live stream:",
+    "Please provide any/all other info on the live stream",
     "Live stream requester",
 ]
 
@@ -530,11 +537,23 @@ def is_livestream_form(text):
     if not text:
         return False
     t = text.lower()
-    return "live stream title" in t and "live stream requester" in t
+    return "live stream title" in t and (
+        "live stream requester" in t or
+        "date and time of live stream" in t or
+        "videographer required" in t
+    )
+
+def _get_livestream_title(text):
+    """Try both title field variants."""
+    title = extract_livestream_field(text, "Live stream title and description")
+    if not title:
+        title = extract_livestream_field(text, "Live stream title")
+    return title or "Live stream"
 
 def extract_livestream_field(text, field_name):
     next_fields = "|".join(re.escape(f) for f in LIVESTREAM_FIELDS if f != field_name)
-    pattern = rf"{re.escape(field_name)}\s*[:\?]?\s*\n(.*?)(?=(?:{next_fields})\s*[:\?]?\s*\n|$)"
+    # Handle both plain labels and bold (*label:*) format
+    pattern = rf"\*?{re.escape(field_name)}\*?\s*[:\?]?\*?\s*\n(.*?)(?=\n\*?(?:{next_fields})\*?\s*[:\?]?\*?\s*\n|$)"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:
         value = match.group(1).strip()
@@ -644,7 +663,7 @@ def process_message(msg, channel_id, processed):
         print(f"\n  New live stream form found (ts: {ts})")
         return _process_form(
             ts, text, channel_id, processed,
-            title_fn=lambda t: "LIVE: " + (extract_livestream_field(t, "Live stream title and description") or "Live stream"),
+            title_fn=lambda t: "LIVE: " + _get_livestream_title(t),
             date_fn=lambda t: extract_livestream_field(t, "Date and time of live stream"),
             location_fn=lambda t: extract_livestream_field(t, "Location"),
             notes_fn=livestream_to_html,
