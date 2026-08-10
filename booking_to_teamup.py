@@ -51,6 +51,7 @@ SLACK_BOOKINGS_CHANNEL = "visual-crew-bookings"
 TEAMUP_API_KEY         = _config.get("teamup_api_key") or os.environ.get("TEAMUP_API_KEY", "")
 TEAMUP_CALENDAR_KEY    = "ksi7k2xr9brt5tn2ac"
 TEAMUP_VISUALS_ID      = 11087400
+TEAMUP_STUDIO_ID       = 11087384
 TEAMUP_BASE_URL        = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
 DEFAULT_DURATION_HOURS = 2
 
@@ -552,31 +553,58 @@ def _get_livestream_title(text):
 
 def extract_livestream_field(text, field_name):
     next_fields = "|".join(re.escape(f) for f in LIVESTREAM_FIELDS if f != field_name)
-    # Handle both plain labels and bold (*label:*) format
     pattern = rf"\*?{re.escape(field_name)}\*?\s*[:\?]?\*?\s*\n(.*?)(?=\n\*?(?:{next_fields})\*?\s*[:\?]?\*?\s*\n|$)"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:
         value = match.group(1).strip()
+        # If the value looks like a field label, the field was empty
+        if re.match(r'^\*[^*]+\*', value):
+            return ""
         value = re.sub(r'<@[A-Z0-9]+>', '', value)
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
         return value.strip()
     return ""
 
+# Display names for TeamUp notes — maps field names to clean labels
+LIVESTREAM_DISPLAY_NAMES = {
+    "Live stream title and description": "Live stream title",
+    "Live stream title": "Live stream title",
+    "Date and time of live stream": "Date and time of live stream",
+    "Is a videographer required to shoot this or will a link to the stream be provided?": "Videographer required?",
+    "Link to livestream if provided from another source": "Link to live stream",
+    "Link to live stream (if externally sourced)": "Link to live stream",
+    "Location": "Location",
+    "Will a reporter be attending?": "Will reporter be attending?",
+    "If yes, who is the reporter?": "Reporter",
+    "Will the reporter be attending?": "Will reporter be attending?",
+    "Who is the reporter and will they be attending?": "Reporter",
+    "Please provide any/all other info on the live stream:": "Additional info",
+    "Please provide any/all other info on the live stream": "Additional info",
+    "Live stream requester": "Live stream requester",
+}
+
 def livestream_to_html(text):
     parts = ["<p>"]
+    seen_labels = set()
     for field in LIVESTREAM_FIELDS:
         value = extract_livestream_field(text, field)
-        if value:
-            value_html = (
-                value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>")
-            )
-            parts.append(f"<strong>{field}</strong><br>")
-            parts.append(f"{value_html}<br><br>")
+        if not value:
+            continue
+        display = LIVESTREAM_DISPLAY_NAMES.get(field, field)
+        # Skip duplicate display labels (e.g. both "Please provide..." variants)
+        if display in seen_labels:
+            continue
+        seen_labels.add(display)
+        value_html = (
+            value
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br>")
+        )
+        parts.append(f"<strong>{display}</strong><br>")
+        parts.append(f"{value_html}<br><br>")
     parts.append("</p>")
     return "\n".join(parts)
 
@@ -585,7 +613,7 @@ def livestream_to_html(text):
 # TEAMUP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=None):
+def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=None, is_livestream=False):
     headers = {
         "Teamup-Token": TEAMUP_API_KEY,
         "Content-Type": "application/json",
@@ -596,8 +624,11 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_
             return None
         return dt.strftime("%Y-%m-%dT%H:%M:%S%z")
 
+    # Livestream entries go to both Visuals and Studio subcalendars
+    subcal_ids = [TEAMUP_VISUALS_ID, TEAMUP_STUDIO_ID] if is_livestream else [TEAMUP_VISUALS_ID]
+
     payload = {
-        "subcalendar_ids": [TEAMUP_VISUALS_ID],
+        "subcalendar_ids": subcal_ids,
         "title": title,
         "notes": notes_html,
         "location": location or "",
@@ -668,11 +699,12 @@ def process_message(msg, channel_id, processed):
             location_fn=lambda t: extract_livestream_field(t, "Location"),
             notes_fn=livestream_to_html,
             label="live stream",
+            is_livestream=True,
         )
     return False
 
 
-def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_fn, notes_fn, label):
+def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_fn, notes_fn, label, is_livestream=False):
     title    = title_fn(text)
     date_str = date_fn(text)
     location = location_fn(text)
@@ -685,7 +717,7 @@ def _process_form(ts, text, channel_id, processed, title_fn, date_fn, location_f
     print(f"  Parsed:   {start_dt}")
     print(f"  Location: {location}")
 
-    event = create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=date_str)
+    event = create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_str=date_str, is_livestream=is_livestream)
 
     if event:
         event_id   = event.get("id", "")
