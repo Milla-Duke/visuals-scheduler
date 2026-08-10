@@ -560,7 +560,13 @@ def extract_livestream_field(text, field_name):
         # If the value looks like a field label, the field was empty
         if re.match(r'^\*[^*]+\*', value):
             return ""
-        value = re.sub(r'<@[A-Z0-9]+>', '', value)
+        # Resolve user mentions to display names
+        value = re.sub(r'<@[A-Z0-9]+\|([^>]+)>', r'@\1', value)
+        def _replace_bare_mention(m):
+            uid = m.group(1)
+            name = get_slack_display_name(uid)
+            return ('@' + name) if name else ''
+        value = re.sub(r'<@([A-Z0-9]+)>', _replace_bare_mention, value)
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
         return value.strip()
@@ -662,9 +668,49 @@ def create_teamup_event(title, start_dt, end_dt, location, notes_html, raw_date_
 # MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def extract_text_from_blocks(blocks):
+    """
+    Reconstruct plain text from Slack rich_text blocks.
+    This gives us the full message content when the text field is truncated.
+    Bold text gets wrapped in *asterisks* to match the format our parsers expect.
+    """
+    lines = []
+    for block in blocks:
+        if block.get("type") != "rich_text":
+            continue
+        for element in block.get("elements", []):
+            if element.get("type") == "rich_text_section":
+                line_parts = []
+                for el in element.get("elements", []):
+                    el_type = el.get("type")
+                    if el_type == "text":
+                        text = el.get("text", "")
+                        if el.get("style", {}).get("bold"):
+                            text = f"*{text.strip()}*"
+                        line_parts.append(text)
+                    elif el_type == "user":
+                        uid = el.get("user_id", "")
+                        line_parts.append(f"<@{uid}>")
+                    elif el_type == "link":
+                        url = el.get("url", "")
+                        label = el.get("text", url)
+                        line_parts.append(f"<{url}|{label}>")
+                lines.append("".join(line_parts))
+    return "\n".join(lines)
+
+
 def process_message(msg, channel_id, processed):
     ts   = msg.get("ts", "")
     text = msg.get("text", "")
+
+    # If the message has blocks, reconstruct full text from them.
+    # Slack truncates the text field for workflow form messages but puts
+    # the full content in blocks.
+    blocks = msg.get("blocks", [])
+    if blocks:
+        full_text = extract_text_from_blocks(blocks)
+        if len(full_text) > len(text):
+            text = full_text
 
     # Check Redis first (reliable, persistent across runs)
     # Fall back to the local processed set (file-based, for same-run dedup)
