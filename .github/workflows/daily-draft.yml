@@ -41,4 +41,9 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TEAMUP_API_KEY: ${{ secrets.TEAMUP_API_KEY }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          # Used only for the once-per-day dedupe lock (see acquire_daily_post_lock
+          # in visuals_daily_draft.py) — stops a delayed duplicate cron trigger
+          # from posting the draft twice.
+          UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: python visuals_daily_draft.py

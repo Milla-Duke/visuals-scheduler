@@ -43,6 +43,10 @@ TEAMUP_STUDIO_ID = 11087384  # Studio subcalendar (hardcoded — not name-looked
 SLACK_BOT_TOKEN = _config.get("slack_bot_token") or os.environ.get("SLACK_BOT_TOKEN", "")
 SLACK_STAGING_CHANNEL = "visuals-team-chat-24"
 TEAMUP_BASE_URL = f"https://api.teamup.com/{TEAMUP_CALENDAR_KEY}"
+# Upstash Redis — used only for the daily-post dedupe lock (see acquire_daily_post_lock).
+# Reads from config.json, falls back to environment variable — same pattern as the tokens above.
+UPSTASH_REDIS_REST_URL = _config.get("upstash_redis_rest_url") or os.environ.get("UPSTASH_REDIS_REST_URL", "")
+UPSTASH_REDIS_REST_TOKEN = _config.get("upstash_redis_rest_token") or os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 # Weekend job entries that should appear as plain links with no time
 WEEKEND_NO_TIME_TITLES = {"morning update", "morning bulletin", "afternoon bulletin"}
 # Entries to exclude entirely from Saturday and Sunday job lists
@@ -221,8 +225,6 @@ def _parse_time_minutes(t_str):
     elif period == "am" and hour == 12:
         hour = 0
     return hour * 60 + minute
-
-
 def shift_sort_key(shifts, name, d):
     """Return a sort key (minutes since midnight) for a person's shift start time."""
     key = (name, d)
@@ -234,8 +236,6 @@ def shift_sort_key(shifts, name, d):
     if isinstance(val, str):
         return 9997   # sick/training — sort near end but before off
     return _parse_time_minutes(val[0])
-
-
 def build_weekend_shift_lines(shifts, d):
     """
     Build shift lines for a weekend day from CSV data.
@@ -565,11 +565,16 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         if mon_away:
             lines.append(f"Away: {', '.join(mon_away)}")
         lines.append("")
+        mon_shift_lines = []
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, mon)):
             if (name, mon) not in shifts:
                 continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
-            lines.append(f"{display} {shift_display(shifts, name, mon)}")
+            mon_shift_lines.append(f"{display} {shift_display(shifts, name, mon)}")
+        if mon_shift_lines:
+            lines.extend(mon_shift_lines)
+        else:
+            lines.append("_(Shifts — fill in)_")
         lines.append("")
         lines += build_day_jobs_section(mon, subcalendar_id, weekend=False)
         mon_studio = build_day_studio_lines(mon)
@@ -591,11 +596,16 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
         if away_names:
             lines.append(f"Away: {', '.join(away_names)}")
         lines.append("")
+        day_shift_lines = []
         for name in sorted(SHIFT_TIME_MEMBERS, key=lambda n: shift_sort_key(shifts, n, d)):
             if (name, d) not in shifts:
                 continue  # not in CSV — skip rather than show _(time)_
             display = name_for_shift_list(name)
-            lines.append(f"{display} {shift_display(shifts, name, d)}")
+            day_shift_lines.append(f"{display} {shift_display(shifts, name, d)}")
+        if day_shift_lines:
+            lines.extend(day_shift_lines)
+        else:
+            lines.append("_(Shifts — fill in)_")
     lines.append("")
     # -- Jobs + Edits (weekday only — Friday has these inline per day above) ---
     if len(target_dates) == 1:
@@ -613,6 +623,47 @@ def build_draft_message(target_dates, subcalendar_id, editing_subcalendar_id=Non
                 lines.append("*Edits:*")
                 lines += edit_lines
     return "\n".join(lines)
+# ═══════════════════════════════════════════════════════════════════════════════
+# DUPLICATE-POST GUARD
+# ═══════════════════════════════════════════════════════════════════════════════
+def acquire_daily_post_lock(date_obj):
+    """
+    Atomically claim the "already posted today" flag in Upstash Redis.
+
+    Why this exists: daily-draft.yml has two schedule cron entries (one for
+    NZST, one for NZDT) so daylight saving is handled without manual changes.
+    Only one of them is "correct" at any given time of year — the other is
+    supposed to be caught by the hour check in main() and exit quietly. But
+    GitHub Actions can delay a scheduled run by many minutes (especially
+    around common trigger times like :45 past the hour, when lots of
+    workflows across GitHub fire at once). If the "wrong" cron run gets
+    delayed past the top of the 6pm NZ hour, it slips past the hour check
+    and posts a duplicate. This lock is the actual guarantee of "once per
+    day", independent of timing jitter.
+
+    Returns True if this run just claimed the lock (i.e. it should proceed
+    to post). Returns False if the lock was already held by an earlier run
+    today. Fails open (returns True) if Redis isn't configured or can't be
+    reached, so a Redis hiccup never silently blocks the real daily post.
+    """
+    if not UPSTASH_REDIS_REST_URL or not UPSTASH_REDIS_REST_TOKEN:
+        print("WARNING: Upstash Redis not configured — skipping duplicate-post lock.")
+        return True
+    key = f"visuals_daily_draft_posted:{date_obj.isoformat()}"
+    # SET key 1 EX 86400 NX — only succeeds if the key doesn't already exist.
+    # Upstash's REST API accepts simple commands as path segments.
+    url = f"{UPSTASH_REDIS_REST_URL.rstrip('/')}/set/{key}/1/EX/86400/NX"
+    headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        result = resp.json().get("result")
+        # "OK" means we just set it (lock acquired, safe to post).
+        # null/None means the key already existed (already posted today).
+        return result == "OK"
+    except requests.RequestException as e:
+        print(f"WARNING: Could not reach Upstash Redis for dedupe lock: {e}")
+        return True  # fail open — don't block a legitimate post over a Redis hiccup
 # ═══════════════════════════════════════════════════════════════════════════════
 # SLACK POSTING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -671,6 +722,20 @@ def main():
     if event_name == "schedule" and now_nz.hour != 18:
         print(f"Skipping — it's {now_nz.strftime('%H:%M')} NZ time, outside the 6pm posting window.")
         sys.exit(0)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # ── DUPLICATE-POST GUARD (scheduled runs only) ────────────────────────────
+    # The hour check above can still let a delayed cron trigger through if it
+    # lands late enough to cross into the 6pm NZ hour (see
+    # acquire_daily_post_lock for the full explanation). This Redis lock is
+    # the actual once-per-day guarantee. Manual runs and slash-command
+    # triggers are deliberate, so they bypass this and always post.
+    if event_name == "schedule":
+        today_nz = now_nz.date()
+        if not acquire_daily_post_lock(today_nz):
+            print(f"Skipping — a scheduled run already posted today's draft ({today_nz.isoformat()} NZ). "
+                  f"This is likely a delayed duplicate cron trigger.")
+            sys.exit(0)
     # ──────────────────────────────────────────────────────────────────────────
 
     # ── TEST MODE ──────────────────────────────────────────────────────────────
