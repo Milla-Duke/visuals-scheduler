@@ -106,7 +106,13 @@ def get_slack_display_name(user_id):
         data = resp.json()
         if data.get("ok"):
             profile = data["user"].get("profile", {})
-            name = (profile.get("display_name") or profile.get("real_name") or "").strip()
+            # Try display_name first, then real_name, then email prefix as last resort
+            name = (
+                profile.get("display_name") or
+                profile.get("real_name") or
+                (profile.get("email", "").split("@")[0]) or
+                ""
+            ).strip()
             _slack_user_cache[user_id] = name or None
             return name or None
     except Exception:
@@ -341,7 +347,7 @@ def extract_field(text, field_name, fields_list=None):
         def _replace_bare_mention(m):
             uid = m.group(1)
             name = get_slack_display_name(uid)
-            return ('@' + name) if name else ''
+            return ('@' + name) if name else f'@{uid}'
         value = re.sub(r'<@([A-Z0-9]+)>', _replace_bare_mention, value)
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
@@ -565,7 +571,7 @@ def extract_livestream_field(text, field_name):
         def _replace_bare_mention(m):
             uid = m.group(1)
             name = get_slack_display_name(uid)
-            return ('@' + name) if name else ''
+            return ('@' + name) if name else f'@{uid}'
         value = re.sub(r'<@([A-Z0-9]+)>', _replace_bare_mention, value)
         value = re.sub(r'<(https?://[^|>]+)\|([^>]+)>', r'\2', value)
         value = re.sub(r'<(https?://[^>]+)>', r'\1', value)
