@@ -5,9 +5,6 @@ on:
   # SCHEDULED: runs at 6:45pm NZ time on weekdays.
   # Two entries because NZ switches between NZST (UTC+12) and NZDT (UTC+13)
   # depending on daylight saving — this covers both without any manual changes.
-  schedule:
-    - cron: '45 6 * * 1-5'   # 6:45pm NZST (UTC+12), used in winter
-    - cron: '45 5 * * 1-5'   # 6:45pm NZDT (UTC+13), used in summer
 
   # MANUAL (GitHub UI): lets you click "Run workflow" from the GitHub
   # Actions tab to generate a draft at any time.
