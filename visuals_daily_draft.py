@@ -404,7 +404,7 @@ def format_event_line(event, skip_time=False):
     # Handles multiple names separated by commas e.g. "Michael Craig, Anna Heath"
     mention = ""
     if who:
-        names = [n.strip() for n in re.split(r',|&', who) if n.strip()]
+        names = [n.strip() for n in re.split(r'\s*(?:&|,|/|\|| and )\s*', who, flags=re.IGNORECASE) if n.strip()]
         mention = " ".join(slack_mention(n) for n in names) + " "
     # TeamUp event link
     if event_id:

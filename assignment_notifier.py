@@ -55,6 +55,14 @@ NAME_TO_SLACK_ID = {
     "Katie Oliver":        "U06Q0JLGKTN",
 }
 
+# Splits on '&', ',', '/', '|', or the word 'and' between names —
+# e.g. "Sylvie Whinray & Finn Little", "Anna Heath and Anne Gibson"
+NAME_SPLIT_PATTERN = r'\s*(?:&|,|/|\|| and )\s*'
+
+def split_names(who):
+    """Split a TeamUp 'who' field into individual names, however they're joined."""
+    return [n.strip() for n in re.split(NAME_SPLIT_PATTERN, who, flags=re.IGNORECASE) if n.strip()]
+
 def slack_mention(name):
     name = name.strip()
     if name in NAME_TO_SLACK_ID:
@@ -63,6 +71,11 @@ def slack_mention(name):
         if key.lower() == name.lower():
             return f"<@{uid}>"
     return name
+
+def slack_mentions_for_who(who):
+    """Convert a full 'who' field (possibly multiple names) into a
+    space-separated string of resolved @mentions / plain names."""
+    return " ".join(slack_mention(n) for n in split_names(who))
 
 def redis_get(key):
     headers = {"Authorization": f"Bearer {UPSTASH_REDIS_REST_TOKEN}"}
@@ -272,11 +285,11 @@ def main():
 
         event_link   = f"https://teamup.com/c/q1rqrs/events/{event_id}"
         date_clause  = f" on {format_dt(start_dt)}" if start_dt else ""
-        who_mention  = slack_mention(who)
+        who_mention  = slack_mentions_for_who(who)
         mentions_str = " ".join(f"<@{uid}>" for uid in mention_ids) if mention_ids else ""
 
         if last_assigned:
-            previous_mention = slack_mention(last_assigned)
+            previous_mention = slack_mentions_for_who(last_assigned)
             confirm_msg = (
                 f"\u2705 {mentions_str} {who_mention} has now been assigned to your job "
                 f"\u2014 <{event_link}|{title}>{date_clause}. "
