@@ -5,7 +5,7 @@ import json
 import requests
 from time import time
 
-with open("/Users/ella.wilks/Documents/visuals-scheduler/config.json") as f:
+with open("/Users/ella.wilks/Documents/Projects/visuals-scheduler/config.json") as f:
     config = json.load(f)
 
 TOKEN = config.get("slack_bot_token", "")
