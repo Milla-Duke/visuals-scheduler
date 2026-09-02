@@ -280,21 +280,15 @@ async function handleTeamupWebhook(body) {
     }
 
     // ── Native TeamUp entry ───────────────────────────────────────────────────
-    // Dispatch directly to GitHub Actions, passing the event details as
-    // client_payload. The native-notifier workflow handles last_assigned
-    // tracking and Slack notifications from GitHub Actions where there
-    // are no network restrictions.
-    const ok = await triggerWorkflow('native-assignment-trigger', {
-      event_id: eventId,
-      who,
-      title,
-      start_dt: startDt,
-    });
-    if (ok) {
-      console.log(`TeamUp webhook: dispatched native-assignment-trigger for event ${eventId} who="${who}"`);
-    } else {
-      console.log(`TeamUp webhook: WARNING — failed to dispatch for event ${eventId}`);
-    }
+    // Entries created directly in TeamUp (not via the Slack booking/live
+    // stream form) intentionally get no automatic assignment notification.
+    // A native-assignment notifier was built and removed after causing a
+    // spam incident on rollout (see the Technical Reference doc, Part 5) —
+    // every visuals job is now booked through the Slack form instead, which
+    // is fully covered by assignment_notifier.py above. Do not re-add a
+    // native-assignment dispatch here without pre-seeding Redis with the
+    // current assignment state first.
+    console.log(`TeamUp webhook: event ${eventId} is a native (non-form) entry — no automatic notification`);
   }
 }
 
